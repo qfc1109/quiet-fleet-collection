@@ -1,0 +1,24 @@
+qfc:
+  local:
+    db:
+      username: &qfc_db_username root
+      password: &qfc_db_password "<your-password>"
+  datasource:
+    site:
+      url: jdbc:mysql://[::1]:3306/qfc_site?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: *qfc_db_username
+      password: *qfc_db_password
+    site-log:
+      url: jdbc:mysql://[::1]:3306/qfc_site_log?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: *qfc_db_username
+      password: *qfc_db_password
+    admin:
+      url: jdbc:mysql://[::1]:3306/qfc_admin?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: *qfc_db_username
+      password: *qfc_db_password
+    admin-log:
+      url: jdbc:mysql://[::1]:3306/qfc_admin_log?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: *qfc_db_username
+      password: *qfc_db_password
+  storage:
+    root: ./storage

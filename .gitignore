@@ -1,0 +1,85 @@
+# Quiet Fleet Collection
+
+# Java / Spring Boot
+server/target/
+*.class
+hs_err_pid*
+replay_pid*
+
+# Maven local output
+dependency-reduced-pom.xml
+
+# Local agent planning notes
+docs/superpowers/
+
+# Node / Vue / Vite
+web/node_modules/
+web/dist/
+web/dist-ssr/
+web/.vite/
+web/.vite-temp/
+web/coverage/
+admin-web/node_modules/
+admin-web/dist/
+admin-web/dist-ssr/
+admin-web/.vite/
+admin-web/.vite-temp/
+admin-web/coverage/
+
+# Keep package locks committed for reproducible installs.
+!web/package-lock.json
+!admin-web/package-lock.json
+!web/pnpm-lock.yaml
+!web/yarn.lock
+
+# Local runtime files
+storage/
+server/storage/
+logs/
+server/logs/
+web/logs/
+admin-web/logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment overrides and local secrets
+.env
+.env.*
+*.local
+config/application-local.yml
+config/mysql-client.cnf
+application-local.yml
+application-local.yaml
+application-local.properties
+server/src/main/resources/application-local.yml
+server/src/main/resources/application-local.yaml
+server/src/main/resources/application-local.properties
+
+# Keep checked-in examples.
+!*.example
+!config/application-local.yml.example
+!config/mysql-client.cnf.example
+!server/src/main/resources/application-local.yml.example
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.classpath
+.project
+.settings/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini

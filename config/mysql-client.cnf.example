@@ -1,0 +1,8 @@
+# Copy this file to config/mysql-client.cnf and fill in your local MySQL login.
+# config/mysql-client.cnf is ignored by Git and should not be committed.
+[client]
+host=::1
+port=3306
+user=root
+password=<your-password>
+default-character-set=utf8mb4
