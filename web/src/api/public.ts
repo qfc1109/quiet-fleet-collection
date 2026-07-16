@@ -29,6 +29,15 @@ export async function getProjectFiles(slug: string): Promise<FileView[]> {
   return unwrap(response.data)
 }
 
+export async function downloadPublicProjectFilesArchive(slug: string, fileIds: number[]): Promise<Blob> {
+  const response = await http.post<Blob>(
+    `/public/projects/${encodeURIComponent(slug)}/files/archive`,
+    { fileIds },
+    { responseType: 'blob', timeout: 0 },
+  )
+  return response.data
+}
+
 export async function createProjectIssue(slug: string, title: string, content: string): Promise<ProjectIssueView> {
   const response = await http.post<ApiResponse<ProjectIssueView>>(`/public/projects/${slug}/issues`, { title, content })
   return unwrap(response.data)

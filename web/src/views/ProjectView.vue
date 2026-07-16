@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { createProjectIssue, getProject, getProjectFiles } from '../api/public'
+import { createProjectIssue, downloadPublicProjectFilesArchive, getProject, getProjectFiles } from '../api/public'
 import type { FileView, ProjectView } from '../api/types'
 import FileTreeList from '../components/FileTreeList.vue'
 import { useSessionStore } from '../stores/session'
@@ -10,16 +10,25 @@ const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
 const slug = computed(() => String(route.params.slug || ''))
-const fromSpaceProjectManagement = computed(() => route.query.from === 'space-project-management')
-const projectManagementRoute = { name: 'space', query: { module: 'projects' } }
-const issueDialogOpen = computed(() => route.name === 'project-issue-new')
-const issueEntryRoute = computed(() => ({
-  name: 'project-issue-new',
-  params: { slug: slug.value },
-  query: route.query,
+const spaceProjectId = computed(() => String(route.params.projectId || ''))
+const fromSpaceProjectVisitor = computed(
+  () => route.name === 'space-project-visitor' || route.name === 'space-project-visitor-issue-new',
+)
+const projectManagementRoute = computed(() => ({
+  name: 'space-project-files',
+  params: { projectId: spaceProjectId.value },
 }))
+const issueDialogOpen = computed(() => route.name === 'project-issue-new' || route.name === 'space-project-visitor-issue-new')
+const issueEntryRoute = computed(() => ({
+  name: fromSpaceProjectVisitor.value ? 'space-project-visitor-issue-new' : 'project-issue-new',
+  params: fromSpaceProjectVisitor.value
+    ? { projectId: spaceProjectId.value, slug: slug.value }
+    : { slug: slug.value },
+}))
+const projectArchiveUrl = computed(() => `/api/public/projects/${encodeURIComponent(slug.value)}/download`)
 const project = ref<ProjectView | null>(null)
 const files = ref<FileView[]>([])
+const selectedFileIds = ref<number[]>([])
 const loading = ref(true)
 const error = ref('')
 const issueTitle = ref('')
@@ -27,6 +36,13 @@ const issueContent = ref('')
 const issueError = ref('')
 const issueMessage = ref('')
 const submittingIssue = ref(false)
+const downloadingSelectedFiles = ref(false)
+const selectedFiles = computed(() => {
+  const selectedIds = new Set(selectedFileIds.value)
+  return files.value.filter((file) => selectedIds.has(file.id))
+})
+const selectedFileCount = computed(() => selectedFiles.value.length)
+const selectedDownloadDisabled = computed(() => selectedFileCount.value === 0 || downloadingSelectedFiles.value)
 
 async function loadProject() {
   loading.value = true
@@ -38,6 +54,7 @@ async function loadProject() {
     ])
     project.value = projectInfo
     files.value = fileList
+    pruneSelectedFiles()
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : '项目加载失败'
   } finally {
@@ -47,13 +64,53 @@ async function loadProject() {
 
 onMounted(loadProject)
 watch(slug, loadProject)
+watch(files, pruneSelectedFiles)
+
+function pruneSelectedFiles() {
+  const availableIds = new Set(files.value.map((file) => file.id))
+  selectedFileIds.value = selectedFileIds.value.filter((fileId) => availableIds.has(fileId))
+}
 
 function goLoginForIssue() {
   router.push({ path: '/login', query: { redirect: route.fullPath } })
 }
 
 function closeIssueDialog() {
-  router.push({ name: 'project', params: { slug: slug.value }, query: route.query })
+  if (fromSpaceProjectVisitor.value) {
+    router.push({ name: 'space-project-visitor', params: { projectId: spaceProjectId.value, slug: slug.value } })
+    return
+  }
+  router.push({ name: 'project', params: { slug: slug.value } })
+}
+
+function saveArchiveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function handleDownloadSelectedFiles() {
+  const requestedFileIds = [...selectedFileIds.value]
+  const requestedCount = requestedFileIds.length
+  if (requestedCount === 0) {
+    return
+  }
+
+  error.value = ''
+  downloadingSelectedFiles.value = true
+  try {
+    const blob = await downloadPublicProjectFilesArchive(slug.value, requestedFileIds)
+    saveArchiveBlob(blob, `${slug.value || 'project'}-selected.zip`)
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : '文件下载失败'
+  } finally {
+    downloadingSelectedFiles.value = false
+  }
 }
 
 async function submitIssue() {
@@ -84,7 +141,7 @@ async function submitIssue() {
       <h1>{{ project?.name || slug }}</h1>
       <p class="lead">{{ project?.description || '项目详情和文件列表会在公开接口接入后展示。' }}</p>
     </div>
-    <RouterLink v-if="fromSpaceProjectManagement" class="secondary-action" :to="projectManagementRoute">
+    <RouterLink v-if="fromSpaceProjectVisitor" class="secondary-action" :to="projectManagementRoute">
       返回项目管理
     </RouterLink>
   </section>
@@ -95,11 +152,32 @@ async function submitIssue() {
         <h2>文件</h2>
         <p>{{ loading ? '正在加载' : `${files.length} 个文件` }}</p>
       </div>
-      <RouterLink class="primary-action issue-entry-action" :to="issueEntryRoute">提出问题</RouterLink>
+      <div class="detail-heading-actions">
+        <div v-if="files.length > 0" class="bulk-file-actions" aria-label="批量文件操作">
+          <span v-if="selectedFileCount > 0">已选 {{ selectedFileCount }} 个</span>
+          <button
+            class="secondary-button bulk-download-button"
+            type="button"
+            :disabled="selectedDownloadDisabled"
+            @click="handleDownloadSelectedFiles"
+          >
+            {{ downloadingSelectedFiles ? '下载中' : '批量下载' }}
+          </button>
+        </div>
+        <a v-if="files.length > 0" class="secondary-action" :href="projectArchiveUrl">下载整个项目</a>
+        <RouterLink class="primary-action issue-entry-action" :to="issueEntryRoute">提出问题</RouterLink>
+      </div>
     </div>
     <p v-if="error" class="status error">{{ error }}</p>
     <p v-else-if="!loading && files.length === 0" class="status">这个项目还没有文件。</p>
-    <FileTreeList v-else :files="files" :project-slug="slug" />
+    <FileTreeList
+      v-else
+      :files="files"
+      :project-slug="slug"
+      v-model:selected-file-ids="selectedFileIds"
+      selectable
+      :selection-disabled="downloadingSelectedFiles"
+    />
   </section>
 
   <Teleport to="body">

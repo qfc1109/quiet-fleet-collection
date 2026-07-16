@@ -83,6 +83,10 @@ export interface FileView {
   updatedAt: string
 }
 
+export interface SpaceUploadLimitView {
+  maxFileSizeBytes: number
+}
+
 export interface ExcelPreview {
   rows: string[][]
 }

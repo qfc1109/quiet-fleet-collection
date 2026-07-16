@@ -4,13 +4,20 @@ import com.qfc.auth.LoginUser;
 import com.qfc.auth.LoginSessionService;
 import com.qfc.common.ApiResponse;
 import com.qfc.config.SessionKeys;
+import com.qfc.file.FileArchive;
 import com.qfc.file.FileService;
 import com.qfc.file.FileView;
 import com.qfc.file.MoveProjectFileRequest;
+import com.qfc.file.ProjectFileArchiveRequest;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
+import org.springframework.boot.autoconfigure.web.servlet.MultipartProperties;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 @RestController
 public class SpaceProjectController {
@@ -27,16 +35,29 @@ public class SpaceProjectController {
     private final ProjectService projectService;
     private final FileService fileService;
     private final LoginSessionService loginSessionService;
+    private final MultipartProperties multipartProperties;
 
-    public SpaceProjectController(ProjectService projectService, FileService fileService, LoginSessionService loginSessionService) {
+    public SpaceProjectController(
+        ProjectService projectService,
+        FileService fileService,
+        LoginSessionService loginSessionService,
+        MultipartProperties multipartProperties
+    ) {
         this.projectService = projectService;
         this.fileService = fileService;
         this.loginSessionService = loginSessionService;
+        this.multipartProperties = multipartProperties;
     }
 
     @GetMapping("/api/space/projects")
     public ApiResponse<List<ProjectView>> listProjects(HttpServletRequest request) {
         return ApiResponse.success(projectService.listSpaceProjects(currentSiteUser(request).getId()));
+    }
+
+    @GetMapping("/api/space/upload-limits")
+    public ApiResponse<SpaceUploadLimitView> uploadLimits(HttpServletRequest request) {
+        currentSiteUser(request);
+        return ApiResponse.success(new SpaceUploadLimitView(multipartProperties.getMaxFileSize().toBytes()));
     }
 
     @PostMapping("/api/space/projects")
@@ -66,6 +87,24 @@ public class SpaceProjectController {
     @GetMapping("/api/space/projects/{projectId}/files")
     public ApiResponse<List<FileView>> listProjectFiles(@PathVariable Long projectId, HttpServletRequest request) {
         return ApiResponse.success(fileService.listOwnedProjectFiles(currentSiteUser(request).getId(), projectId));
+    }
+
+    @GetMapping("/api/space/projects/{projectId}/download")
+    public ResponseEntity<StreamingResponseBody> downloadProjectArchive(
+        @PathVariable Long projectId,
+        HttpServletRequest request
+    ) {
+        return archiveResponse(fileService.openOwnedProjectArchive(currentSiteUser(request).getId(), projectId));
+    }
+
+    @PostMapping("/api/space/projects/{projectId}/files/archive")
+    public ResponseEntity<StreamingResponseBody> downloadSelectedProjectFilesArchive(
+        @PathVariable Long projectId,
+        @RequestBody(required = false) ProjectFileArchiveRequest archiveRequest,
+        HttpServletRequest request
+    ) {
+        List<Long> fileIds = archiveRequest == null ? null : archiveRequest.getFileIds();
+        return archiveResponse(fileService.openOwnedSelectedProjectFilesArchive(currentSiteUser(request).getId(), projectId, fileIds));
     }
 
     @PostMapping(value = "/api/space/projects/{projectId}/files", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -100,5 +139,17 @@ public class SpaceProjectController {
 
     private String clientIp(HttpServletRequest request) {
         return request == null ? "" : request.getRemoteAddr();
+    }
+
+    private ResponseEntity<StreamingResponseBody> archiveResponse(FileArchive archive) {
+        StreamingResponseBody body = outputStream -> fileService.writeArchive(archive, outputStream);
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType(archive.getMimeType()))
+            .header("X-Content-Type-Options", "nosniff")
+            .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                .filename(archive.getOriginalName(), StandardCharsets.UTF_8)
+                .build()
+                .toString())
+            .body(body);
     }
 }

@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 @RestController
 @RequestMapping("/api")
@@ -32,6 +33,20 @@ public class FileController {
     @GetMapping("/public/projects/{slug}/files")
     public ApiResponse<List<FileView>> listPublicProjectFiles(@PathVariable String slug) {
         return ApiResponse.success(fileService.listPublicProjectFiles(slug));
+    }
+
+    @GetMapping("/public/projects/{slug}/download")
+    public ResponseEntity<StreamingResponseBody> downloadPublicProjectArchive(@PathVariable String slug) {
+        return archiveResponse(fileService.openPublicProjectArchive(slug));
+    }
+
+    @PostMapping("/public/projects/{slug}/files/archive")
+    public ResponseEntity<StreamingResponseBody> downloadPublicSelectedProjectFilesArchive(
+        @PathVariable String slug,
+        @RequestBody(required = false) ProjectFileArchiveRequest archiveRequest
+    ) {
+        List<Long> fileIds = archiveRequest == null ? null : archiveRequest.getFileIds();
+        return archiveResponse(fileService.openPublicSelectedProjectFilesArchive(slug, fileIds));
     }
 
     @GetMapping("/public/files/{fileId}/preview")
@@ -79,6 +94,18 @@ public class FileController {
                 .build()
                 .toString())
             .body(download.getResource());
+    }
+
+    private ResponseEntity<StreamingResponseBody> archiveResponse(FileArchive archive) {
+        StreamingResponseBody body = outputStream -> fileService.writeArchive(archive, outputStream);
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType(archive.getMimeType()))
+            .header("X-Content-Type-Options", "nosniff")
+            .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                .filename(archive.getOriginalName(), StandardCharsets.UTF_8)
+                .build()
+                .toString())
+            .body(body);
     }
 
     @GetMapping("/admin/projects/{projectId}/files")

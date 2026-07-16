@@ -10,6 +10,16 @@ const csrfHttp = axios.create({
 
 let csrfToken = ''
 let csrfTokenRequest: Promise<string> | null = null
+let sessionInvalidationHandler: (() => void) | null = null
+
+export function registerSessionInvalidationHandler(handler: () => void) {
+  sessionInvalidationHandler = handler
+  return () => {
+    if (sessionInvalidationHandler === handler) {
+      sessionInvalidationHandler = null
+    }
+  }
+}
 
 export const http = axios.create({
   baseURL: '/api',
@@ -27,7 +37,8 @@ http.interceptors.request.use(async (config) => {
 http.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error?.response?.data?.code === 'CSRF_TOKEN_INVALID') {
+    const data = await readErrorResponseData(error)
+    if (data?.code === 'CSRF_TOKEN_INVALID') {
       csrfToken = ''
       const config = error.config as (InternalAxiosRequestConfig & { csrfRetried?: boolean }) | undefined
       if (config && !config.csrfRetried && isUnsafeMethod(config.method)) {
@@ -36,9 +47,12 @@ http.interceptors.response.use(
         return http(config)
       }
     }
-    const data = error?.response?.data
     if (data?.code && data.code !== 'SUCCESS') {
-      return Promise.reject(new ApiError(String(data.code), data.message || String(data.code), error.response.status || 0))
+      const apiError = new ApiError(String(data.code), data.message || String(data.code), error.response.status || 0)
+      if (apiError.code === 'ACCOUNT_LOGGED_IN_ELSEWHERE') {
+        sessionInvalidationHandler?.()
+      }
+      return Promise.reject(apiError)
     }
     return Promise.reject(error)
   },
@@ -46,6 +60,37 @@ http.interceptors.response.use(
 
 function isUnsafeMethod(method?: string) {
   return ['post', 'put', 'patch', 'delete'].includes((method || 'get').toLowerCase())
+}
+
+async function readErrorResponseData(error: any) {
+  const data = error?.response?.data
+  if (isJsonBlob(data, error?.response?.headers)) {
+    return readJsonBlob(data)
+  }
+  return data
+}
+
+function isJsonBlob(data: any, headers: any) {
+  return typeof Blob !== 'undefined' && data instanceof Blob && responseContentType(headers).includes('application/json')
+}
+
+async function readJsonBlob(blob: Blob) {
+  const text = await blob.text()
+  if (!text) {
+    return null
+  }
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+function responseContentType(headers: any) {
+  const value = typeof headers?.get === 'function'
+    ? headers.get('content-type')
+    : headers?.['content-type'] || headers?.['Content-Type']
+  return String(value || '').toLowerCase()
 }
 
 async function loadCsrfToken() {

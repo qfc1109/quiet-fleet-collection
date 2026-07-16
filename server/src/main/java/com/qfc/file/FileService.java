@@ -6,6 +6,7 @@ import com.qfc.project.Project;
 import com.qfc.project.ProjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.MalformedURLException;
 import java.net.URLEncoder;
@@ -16,10 +17,15 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.poi.ss.usermodel.Cell;
@@ -45,6 +51,8 @@ public class FileService {
     private static final Pattern MARKDOWN_IMAGE_LINK = Pattern.compile("!\\[([^\\]]*)\\]\\(([^\\s)]+)(\\s+\"[^\"]*\")?\\)");
     private static final Pattern HTML_IMAGE_SRC = Pattern.compile("(?i)(<img\\b[^>]*?\\bsrc\\s*=\\s*)([\"'])([^\"']*)(\\2)");
     private static final Pattern URI_SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*:.*");
+    private static final Pattern WINDOWS_LOCAL_PATH = Pattern.compile("^[a-zA-Z]:/.*");
+    private static final Pattern FILE_URI = Pattern.compile("(?i)^file:/+.*");
 
     private final ProjectMapper projectMapper;
     private final ProjectFileMapper projectFileMapper;
@@ -161,6 +169,63 @@ public class FileService {
         return openStoredFile(file);
     }
 
+    public FileArchive openPublicProjectArchive(String slug) {
+        Project project = projectMapper.selectPublicBySlug(slug);
+        if (project == null) {
+            throw new ApiException("PROJECT_NOT_FOUND", "项目不存在", 404);
+        }
+        return openProjectArchive(project, project.getSlug());
+    }
+
+    public FileArchive openPublicSelectedProjectFilesArchive(String slug, List<Long> fileIds) {
+        Project project = projectMapper.selectPublicBySlug(slug);
+        if (project == null) {
+            throw new ApiException("PROJECT_NOT_FOUND", "项目不存在", 404);
+        }
+        return openSelectedProjectFilesArchive(project, fileIds);
+    }
+
+    public FileArchive openOwnedProjectArchive(Long ownerUserId, Long projectId) {
+        Project project = requireOwnedProject(ownerUserId, projectId);
+        return openProjectArchive(project, project.getSlug());
+    }
+
+    public FileArchive openOwnedSelectedProjectFilesArchive(Long ownerUserId, Long projectId, List<Long> fileIds) {
+        Project project = requireOwnedProject(ownerUserId, projectId);
+        return openSelectedProjectFilesArchive(project, fileIds);
+    }
+
+    private FileArchive openSelectedProjectFilesArchive(Project project, List<Long> fileIds) {
+        if (fileIds == null || fileIds.isEmpty()) {
+            throw new ApiException("EMPTY_ARCHIVE_SELECTION", "请选择要下载的文件", 400);
+        }
+        Set<Long> requestedIds = new LinkedHashSet<Long>(fileIds);
+        List<ProjectFile> selectedFiles = new ArrayList<ProjectFile>();
+        for (ProjectFile file : projectFileMapper.selectByProjectId(project.getId())) {
+            if (requestedIds.contains(file.getId())) {
+                selectedFiles.add(file);
+            }
+        }
+        if (selectedFiles.size() != requestedIds.size()) {
+            throw new ApiException("FILE_NOT_FOUND", "文件不存在", 404);
+        }
+        return new FileArchive(archiveName(project.getSlug() + "-selected"), "application/zip", archiveEntries(selectedFiles));
+    }
+
+    public void writeArchive(FileArchive archive, OutputStream outputStream) {
+        try {
+            ZipOutputStream zip = new ZipOutputStream(outputStream, StandardCharsets.UTF_8);
+            for (FileArchive.Entry entry : archive.getEntries()) {
+                zip.putNextEntry(new ZipEntry(entry.getName()));
+                Files.copy(entry.getPath(), zip);
+                zip.closeEntry();
+            }
+            zip.finish();
+        } catch (IOException exception) {
+            throw new ApiException("PROJECT_ARCHIVE_FAILED", "项目打包下载失败", 500);
+        }
+    }
+
     public FileDownload openAsset(Long fileId, String relativePath) {
         ProjectFile baseFile = findFile(fileId);
         String normalizedPath = normalizeUploadRelativePath(relativePath);
@@ -182,6 +247,35 @@ public class FileService {
         } catch (MalformedURLException exception) {
             throw new ApiException("FILE_READ_FAILED", "文件读取失败", 500);
         }
+    }
+
+    private FileArchive openProjectArchive(Project project, String archiveBaseName) {
+        List<ProjectFile> files = projectFileMapper.selectByProjectId(project.getId());
+        return new FileArchive(archiveName(archiveBaseName), "application/zip", archiveEntries(files));
+    }
+
+    private List<FileArchive.Entry> archiveEntries(List<ProjectFile> files) {
+        List<FileArchive.Entry> entries = new ArrayList<FileArchive.Entry>();
+        Set<String> entryNames = new HashSet<String>();
+        for (ProjectFile file : files) {
+            String entryName = normalizeUploadRelativePath(
+                StringUtils.hasText(file.getRelativePath()) ? file.getRelativePath() : file.getOriginalName()
+            );
+            if (!entryNames.add(entryName)) {
+                throw new ApiException("DUPLICATE_ARCHIVE_PATH", "项目内存在重复文件路径", 500);
+            }
+            Path path = resolveStoragePath(file.getStoragePath());
+            if (!Files.isRegularFile(path)) {
+                throw new ApiException("FILE_NOT_FOUND", "文件不存在", 404);
+            }
+            entries.add(new FileArchive.Entry(entryName, path));
+        }
+        return entries;
+    }
+
+    private String archiveName(String baseName) {
+        String normalized = StringUtils.hasText(baseName) ? baseName.trim() : "project";
+        return normalized.replaceAll("[\\\\/:*?\"<>|]", "_") + ".zip";
     }
 
     public void deleteFile(Long fileId) {
@@ -392,7 +486,13 @@ public class FileService {
     }
 
     private String rewriteMarkdownAssetTarget(ProjectFile file, String target) {
-        if (!StringUtils.hasText(target) || isExternalAssetLink(target)) {
+        if (!StringUtils.hasText(target)) {
+            return target;
+        }
+        if (isLocalAssetLink(target)) {
+            return rewriteLocalMarkdownAssetTarget(file, target);
+        }
+        if (isExternalAssetLink(target)) {
             return target;
         }
         String relativePath = StringUtils.hasText(file.getRelativePath()) ? file.getRelativePath() : file.getOriginalName();
@@ -400,13 +500,127 @@ public class FileService {
         String candidate = StringUtils.hasText(parentPath) ? parentPath + "/" + target : target;
         try {
             String normalizedPath = normalizeLinkedRelativePath(candidate);
-            return "/api/public/files/" + file.getId() + "/assets?path=" + encodeQueryParam(normalizedPath);
+            return assetUrl(file, normalizedPath);
         } catch (ApiException exception) {
             if ("INVALID_FILE_PATH".equals(exception.getCode())) {
                 return target;
             }
             throw exception;
         }
+    }
+
+    private String rewriteLocalMarkdownAssetTarget(ProjectFile file, String target) {
+        List<String> candidates = localAssetCandidates(file, target);
+        for (String candidate : candidates) {
+            try {
+                String normalizedPath = normalizeLinkedRelativePath(candidate);
+                ProjectFile asset = projectFileMapper.selectByProjectIdAndRelativePath(file.getProjectId(), normalizedPath);
+                if (asset != null) {
+                    return assetUrl(file, normalizedPath);
+                }
+            } catch (ApiException exception) {
+                if (!"INVALID_FILE_PATH".equals(exception.getCode())) {
+                    throw exception;
+                }
+            }
+        }
+        return target;
+    }
+
+    private List<String> localAssetCandidates(ProjectFile file, String target) {
+        String localPath = stripLocalAssetPath(target);
+        String baseName = localBaseName(localPath);
+        List<String> suffixes = new ArrayList<String>();
+        addLocalImageDirectorySuffixes(localPath, suffixes);
+        if (StringUtils.hasText(baseName)) {
+            addCandidate(suffixes, "image/" + baseName);
+            addCandidate(suffixes, "images/" + baseName);
+            addCandidate(suffixes, "assets/" + baseName);
+            addCandidate(suffixes, baseName);
+        }
+
+        String relativePath = StringUtils.hasText(file.getRelativePath()) ? file.getRelativePath() : file.getOriginalName();
+        String parentPath = parentPathOf(relativePath);
+        List<String> candidates = new ArrayList<String>();
+        for (String suffix : suffixes) {
+            if (StringUtils.hasText(parentPath)) {
+                addCandidate(candidates, parentPath + "/" + suffix);
+            }
+            addCandidate(candidates, suffix);
+        }
+        return candidates;
+    }
+
+    private String stripLocalAssetPath(String target) {
+        String path = target.replace('\\', '/').trim();
+        int queryIndex = path.indexOf('?');
+        int fragmentIndex = path.indexOf('#');
+        int endIndex = -1;
+        if (queryIndex >= 0 && fragmentIndex >= 0) {
+            endIndex = Math.min(queryIndex, fragmentIndex);
+        } else if (queryIndex >= 0) {
+            endIndex = queryIndex;
+        } else if (fragmentIndex >= 0) {
+            endIndex = fragmentIndex;
+        }
+        if (endIndex >= 0) {
+            path = path.substring(0, endIndex);
+        }
+        if (FILE_URI.matcher(path).matches()) {
+            path = path.replaceFirst("(?i)^file:/+", "");
+            if (path.startsWith("/") && path.length() > 2 && path.charAt(2) == ':') {
+                path = path.substring(1);
+            }
+        }
+        return path;
+    }
+
+    private void addLocalImageDirectorySuffixes(String localPath, List<String> candidates) {
+        String[] segments = localPath.split("/");
+        for (int index = 0; index < segments.length - 1; index++) {
+            String segment = segments[index].toLowerCase(Locale.ROOT);
+            if ("image".equals(segment) || "images".equals(segment) || "assets".equals(segment)) {
+                addCandidate(candidates, joinSegments(segments, index));
+            }
+        }
+    }
+
+    private String joinSegments(String[] segments, int startIndex) {
+        StringBuilder builder = new StringBuilder();
+        for (int index = startIndex; index < segments.length; index++) {
+            if (!StringUtils.hasText(segments[index])) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append('/');
+            }
+            builder.append(segments[index]);
+        }
+        return builder.toString();
+    }
+
+    private String localBaseName(String localPath) {
+        if (!StringUtils.hasText(localPath)) {
+            return "";
+        }
+        int slashIndex = localPath.lastIndexOf('/');
+        return slashIndex < 0 ? localPath : localPath.substring(slashIndex + 1);
+    }
+
+    private void addCandidate(List<String> candidates, String candidate) {
+        if (StringUtils.hasText(candidate) && !candidates.contains(candidate)) {
+            candidates.add(candidate);
+        }
+    }
+
+    private boolean isLocalAssetLink(String target) {
+        String normalizedTarget = target.replace('\\', '/').trim();
+        return WINDOWS_LOCAL_PATH.matcher(normalizedTarget).matches()
+            || FILE_URI.matcher(normalizedTarget).matches();
+    }
+
+    private String assetUrl(ProjectFile file, String normalizedPath) {
+        return "/api/public/files/" + file.getId() + "/assets?path=" + encodeQueryParam(normalizedPath);
     }
 
     private boolean isExternalAssetLink(String target) {

@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import FileTreeList from '../components/FileTreeList.vue'
 import { updateCurrentUserProfile, uploadCurrentUserAvatar } from '../api/auth'
 import {
   createSpaceProject,
   deleteSpaceProject,
   deleteSpaceProjectFile,
+  downloadSpaceProjectFilesArchive,
   getSpaceProjectFiles,
   getSpaceProjectIssues,
   getSpaceProjects,
+  getSpaceUploadLimits,
   moveSpaceProjectFile,
   updateSpaceProject,
   uploadSpaceProjectFile,
@@ -19,6 +21,7 @@ import type { FileView, ProjectIssueView, ProjectView } from '../api/types'
 import { canUseSpaceProjectManagement } from '../router/spaceAccess'
 import { useSessionStore } from '../stores/session'
 import { fileDirectoryOptions, fileDirectoryPath, fileDisplayName } from '../utils/fileTree'
+import { prepareSpaceProjectUploadFiles, type SpaceProjectSkippedFile } from '../utils/qfcIgnore'
 
 function emptyProjectForm(): ProjectForm {
   return {
@@ -44,6 +47,7 @@ const projects = ref<ProjectView[]>([])
 const files = ref<FileView[]>([])
 const projectIssues = ref<ProjectIssueView[]>([])
 const route = useRoute()
+const router = useRouter()
 const session = useSessionStore()
 const selectedProjectId = ref<number | null>(null)
 const loading = ref(true)
@@ -57,6 +61,9 @@ const uploadingAvatar = ref(false)
 const movingFileId = ref<number | null>(null)
 const deletingFileId = ref<number | null>(null)
 const deletingProjectId = ref<number | null>(null)
+const bulkDeletingFiles = ref(false)
+const downloadingSelectedFiles = ref(false)
+const selectedFileIds = ref<number[]>([])
 const showCreateDialog = ref(false)
 const movingFile = ref<FileView | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -65,6 +72,7 @@ const avatarInput = ref<HTMLInputElement | null>(null)
 const message = ref('')
 const error = ref('')
 const issueError = ref('')
+const uploadFailures = ref<UploadFailure[]>([])
 const createForm = ref<ProjectForm>(emptyProjectForm())
 const editForm = ref<ProjectForm>(emptyProjectForm())
 const profileForm = ref({
@@ -74,18 +82,43 @@ const profileForm = ref({
 
 const selectedProject = computed(() => projects.value.find((project) => project.id === selectedProjectId.value) || null)
 const hasProjects = computed(() => projects.value.length > 0)
-const uploadDisabled = computed(() => !selectedProjectId.value || uploading.value)
+const uploadDisabled = computed(() => !selectedProjectId.value || uploading.value || bulkDeletingFiles.value)
 const avatarInitial = computed(() => (session.displayName || session.username || 'A').slice(0, 1).toUpperCase())
 const accountTypeLabel = computed(() => (session.accountType === 'ADMIN' ? '后台管理员' : '网站用户'))
 const movingFileName = computed(() => (movingFile.value ? fileDisplayName(movingFile.value) : ''))
 const moveDirectoryOptions = computed(() => fileDirectoryOptions(files.value))
 const canManageProjects = computed(() => canUseSpaceProjectManagement(session))
+const selectedFiles = computed(() => {
+  const selectedIds = new Set(selectedFileIds.value)
+  return files.value.filter((file) => selectedIds.has(file.id))
+})
+const selectedFileCount = computed(() => selectedFiles.value.length)
+const batchDeleteDisabled = computed(
+  () =>
+    selectedFileCount.value === 0 ||
+    bulkDeletingFiles.value ||
+    downloadingSelectedFiles.value ||
+    deletingFileId.value !== null ||
+    movingFileId.value !== null,
+)
+const selectedDownloadDisabled = computed(
+  () =>
+    selectedFileCount.value === 0 ||
+    downloadingSelectedFiles.value ||
+    bulkDeletingFiles.value ||
+    deletingFileId.value !== null ||
+    movingFileId.value !== null,
+)
 type SpaceModule = 'account' | 'projects'
 type ProjectPanel = 'list' | 'edit' | 'files'
+interface UploadFailure {
+  relativePath: string
+  reason: string
+}
 const activeSpaceModule = ref<SpaceModule>('account')
 const activeProjectPanel = ref<ProjectPanel>('list')
 const moveTargetDirectory = ref('')
-const spaceProjectModuleQuery = 'projects'
+const spaceProjectRouteName = computed(() => String(route.name || ''))
 let messageTimer: number | undefined
 
 function clearMessage() {
@@ -105,6 +138,27 @@ function showSuccessMessage(text: string, autoHide = true) {
       messageTimer = undefined
     }, 2600)
   }
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, '')} MB`
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1).replace(/\.0$/, '')} KB`
+  }
+  return `${bytes} B`
+}
+
+function skippedUploadFailure(file: SpaceProjectSkippedFile): UploadFailure {
+  return {
+    relativePath: file.relativePath,
+    reason: `超过最大上传限制 ${formatFileSize(file.maxFileSizeBytes)}，文件大小 ${formatFileSize(file.fileSizeBytes)}`,
+  }
+}
+
+function uploadErrorReason(caught: unknown) {
+  return caught instanceof Error ? caught.message : '文件上传失败'
 }
 
 function syncProfileForm() {
@@ -129,6 +183,11 @@ function closeCreateDialog() {
   if (!creating.value) {
     showCreateDialog.value = false
   }
+}
+
+function pruneSelectedFiles() {
+  const availableIds = new Set(files.value.map((file) => file.id))
+  selectedFileIds.value = selectedFileIds.value.filter((fileId) => availableIds.has(fileId))
 }
 
 async function loadProjects() {
@@ -156,11 +215,13 @@ async function loadProjects() {
 async function loadFiles() {
   if (!selectedProjectId.value) {
     files.value = []
+    selectedFileIds.value = []
     return
   }
   loadingFiles.value = true
   try {
     files.value = await getSpaceProjectFiles(selectedProjectId.value)
+    pruneSelectedFiles()
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : '文件列表加载失败'
   } finally {
@@ -187,11 +248,14 @@ async function loadIssues() {
 }
 
 function setSelectedProject(project: ProjectView) {
+  if (selectedProjectId.value !== project.id) {
+    selectedFileIds.value = []
+  }
   selectedProjectId.value = project.id
   editForm.value = formFromProject(project)
 }
 
-function returnToProjectList() {
+function resetProjectSelection() {
   selectedProjectId.value = null
   activeProjectPanel.value = 'list'
   files.value = []
@@ -199,37 +263,84 @@ function returnToProjectList() {
   issueError.value = ''
   movingFile.value = null
   moveTargetDirectory.value = ''
+  selectedFileIds.value = []
+}
+
+function routeProjectId() {
+  const value = route.params.projectId
+  const projectId = Number(Array.isArray(value) ? value[0] : value)
+  return Number.isFinite(projectId) && projectId > 0 ? projectId : null
 }
 
 function syncSpaceModuleFromRoute() {
-  if (route.query.module === spaceProjectModuleQuery && canManageProjects.value) {
-    activeSpaceModule.value = 'projects'
-    returnToProjectList()
+  if (spaceProjectRouteName.value === 'space-account' || !canManageProjects.value) {
+    activeSpaceModule.value = 'account'
+    return
   }
+  activeSpaceModule.value = 'projects'
+  if (spaceProjectRouteName.value === 'space-projects') {
+    resetProjectSelection()
+  }
+}
+
+async function syncProjectSelectionFromRoute() {
+  if (activeSpaceModule.value !== 'projects' || !canManageProjects.value) {
+    return
+  }
+  const projectId = routeProjectId()
+  if (!projectId) {
+    return
+  }
+  const project = projects.value.find((item) => item.id === projectId)
+  if (!project) {
+    returnToProjectList()
+    return
+  }
+  setSelectedProject(project)
+  activeProjectPanel.value = spaceProjectRouteName.value === 'space-project-edit' ? 'edit' : 'files'
+  clearMessage()
+  error.value = ''
+  issueError.value = ''
+  if (activeProjectPanel.value === 'files') {
+    await Promise.all([loadFiles(), loadIssues()])
+  }
+}
+
+function openSpaceAccount() {
+  router.push({ name: 'space-account' })
+}
+
+function openSpaceProjects() {
+  router.push({ name: 'space-projects' })
+}
+
+function returnToProjectList() {
+  resetProjectSelection()
+  router.push({ name: 'space-projects' })
 }
 
 function visitorPerspectiveRoute(project: ProjectView) {
   return {
-    name: 'project',
-    params: { slug: project.slug },
-    query: { from: 'space-project-management' },
+    name: 'space-project-visitor',
+    params: { projectId: project.id, slug: project.slug },
   }
 }
 
+function projectArchiveUrl(project: ProjectView) {
+  return `/api/space/projects/${project.id}/download`
+}
+
 async function openProjectFiles(project: ProjectView) {
-  setSelectedProject(project)
-  activeProjectPanel.value = 'files'
   clearMessage()
   error.value = ''
   issueError.value = ''
-  await Promise.all([loadFiles(), loadIssues()])
+  await router.push({ name: 'space-project-files', params: { projectId: project.id } })
 }
 
 function openProjectEditor(project: ProjectView) {
-  setSelectedProject(project)
-  activeProjectPanel.value = 'edit'
   clearMessage()
   error.value = ''
+  router.push({ name: 'space-project-edit', params: { projectId: project.id } })
 }
 
 function issueAuthor(issue: ProjectIssueView) {
@@ -368,17 +479,46 @@ async function uploadSelectedFiles(input: HTMLInputElement, keepFolderPath: bool
   }
   clearMessage()
   error.value = ''
+  uploadFailures.value = []
   uploading.value = true
   try {
-    let uploadedCount = 0
-    for (const file of uploadFiles) {
-      const relativePath = keepFolderPath ? file.webkitRelativePath || file.name : file.name
-      await uploadSpaceProjectFile(selectedProjectId.value, file, relativePath)
-      uploadedCount += 1
-      showSuccessMessage(`正在上传 ${uploadedCount}/${uploadFiles.length}`, false)
+    const uploadLimits = await getSpaceUploadLimits()
+    const preparedUpload = await prepareSpaceProjectUploadFiles(uploadFiles, keepFolderPath, uploadLimits.maxFileSizeBytes)
+    const failures: UploadFailure[] = preparedUpload.skippedFiles.map(skippedUploadFailure)
+    if (preparedUpload.files.length === 0) {
+      uploadFailures.value = failures
+      if (failures.length > 0) {
+        error.value = `没有文件上传成功，${failures.length} 个文件未上传`
+      } else {
+        showSuccessMessage(
+          preparedUpload.ignoredCount > 0
+            ? `已忽略 ${preparedUpload.ignoredCount} 个文件，没有需要上传的文件`
+            : '没有需要上传的文件',
+        )
+      }
+      return
     }
-    showSuccessMessage(uploadFiles.length === 1 ? '文件已上传' : `已上传 ${uploadFiles.length} 个文件`)
-    await loadFiles()
+
+    let uploadedCount = 0
+    for (const file of preparedUpload.files) {
+      try {
+        await uploadSpaceProjectFile(selectedProjectId.value, file.file, file.relativePath)
+        uploadedCount += 1
+      } catch (caught) {
+        failures.push({ relativePath: file.relativePath, reason: uploadErrorReason(caught) })
+        continue
+      }
+      showSuccessMessage(`正在上传 ${uploadedCount}/${preparedUpload.files.length}`, false)
+    }
+    const ignoredSuffix = preparedUpload.ignoredCount > 0 ? `，已忽略 ${preparedUpload.ignoredCount} 个` : ''
+    const failedSuffix = failures.length > 0 ? `，${failures.length} 个未上传` : ''
+    uploadFailures.value = failures
+    if (uploadedCount > 0) {
+      showSuccessMessage(uploadedCount === 1 ? `已上传 1 个文件${ignoredSuffix}${failedSuffix}` : `已上传 ${uploadedCount} 个文件${ignoredSuffix}${failedSuffix}`)
+      await loadFiles()
+    } else {
+      error.value = `没有文件上传成功，${failures.length} 个文件未上传`
+    }
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : '文件上传失败'
   } finally {
@@ -425,11 +565,81 @@ async function handleDeleteFile(file: FileView) {
   try {
     await deleteSpaceProjectFile(file.id)
     files.value = files.value.filter((item) => item.id !== file.id)
+    selectedFileIds.value = selectedFileIds.value.filter((fileId) => fileId !== file.id)
     showSuccessMessage('文件已删除')
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : '文件删除失败'
   } finally {
     deletingFileId.value = null
+  }
+}
+
+async function handleDeleteSelectedFiles() {
+  const targets = selectedFiles.value
+  if (targets.length === 0) {
+    return
+  }
+  if (!window.confirm(`确定删除选中的 ${targets.length} 个文件？`)) {
+    return
+  }
+
+  clearMessage()
+  error.value = ''
+  bulkDeletingFiles.value = true
+  const deletedFileIds: number[] = []
+  try {
+    for (const file of targets) {
+      await deleteSpaceProjectFile(file.id)
+      deletedFileIds.push(file.id)
+    }
+    const deletedIdSet = new Set(deletedFileIds)
+    files.value = files.value.filter((item) => !deletedIdSet.has(item.id))
+    selectedFileIds.value = []
+    showSuccessMessage(targets.length === 1 ? '文件已删除' : `已删除 ${targets.length} 个文件`)
+  } catch (caught) {
+    if (deletedFileIds.length > 0) {
+      const deletedIdSet = new Set(deletedFileIds)
+      files.value = files.value.filter((item) => !deletedIdSet.has(item.id))
+      selectedFileIds.value = selectedFileIds.value.filter((fileId) => !deletedIdSet.has(fileId))
+    }
+    const reason = caught instanceof Error ? caught.message : '文件删除失败'
+    error.value =
+      deletedFileIds.length > 0 ? `已删除 ${deletedFileIds.length} 个文件，部分文件删除失败：${reason}` : reason
+  } finally {
+    bulkDeletingFiles.value = false
+  }
+}
+
+function saveArchiveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function handleDownloadSelectedFiles() {
+  const project = selectedProject.value
+  const requestedFileIds = [...selectedFileIds.value]
+  const requestedCount = requestedFileIds.length
+  if (!project || requestedCount === 0) {
+    return
+  }
+
+  clearMessage()
+  error.value = ''
+  downloadingSelectedFiles.value = true
+  try {
+    const blob = await downloadSpaceProjectFilesArchive(project.id, requestedFileIds)
+    saveArchiveBlob(blob, `${project.slug || 'project'}-selected.zip`)
+    showSuccessMessage(requestedCount === 1 ? '已开始下载 1 个文件' : `已开始下载 ${requestedCount} 个文件`)
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : '文件下载失败'
+  } finally {
+    downloadingSelectedFiles.value = false
   }
 }
 
@@ -474,12 +684,20 @@ onMounted(async () => {
   syncSpaceModuleFromRoute()
   if (canManageProjects.value) {
     await loadProjects()
+    await syncProjectSelectionFromRoute()
   } else {
     loading.value = false
   }
 })
 
-watch(() => route.query.module, syncSpaceModuleFromRoute)
+watch(
+  () => [route.name, route.params.projectId],
+  async () => {
+    syncSpaceModuleFromRoute()
+    await syncProjectSelectionFromRoute()
+  },
+)
+watch(files, pruneSelectedFiles)
 
 onBeforeUnmount(clearMessage)
 </script>
@@ -508,6 +726,15 @@ onBeforeUnmount(clearMessage)
     </p>
   </div>
   <p v-if="error" class="status error">{{ error }}</p>
+  <section v-if="uploadFailures.length > 0" class="upload-failure-panel" aria-label="上传失败清单">
+    <h2>上传失败清单</h2>
+    <ul class="upload-failure-list">
+      <li v-for="failure in uploadFailures" :key="failure.relativePath">
+        <span>{{ failure.relativePath }}</span>
+        <small>{{ failure.reason }}</small>
+      </li>
+    </ul>
+  </section>
 
   <section class="page-section space-module-layout" aria-label="个人空间模块">
     <aside class="space-module-sidebar" aria-label="模块">
@@ -515,7 +742,7 @@ onBeforeUnmount(clearMessage)
         class="space-module-tab"
         :class="{ active: activeSpaceModule === 'account' }"
         type="button"
-        @click="activeSpaceModule = 'account'"
+        @click="openSpaceAccount"
       >
         <span>账号中心</span>
         <small>头像、昵称、简介</small>
@@ -525,7 +752,7 @@ onBeforeUnmount(clearMessage)
         class="space-module-tab"
         :class="{ active: activeSpaceModule === 'projects' }"
         type="button"
-        @click="activeSpaceModule = 'projects'"
+        @click="openSpaceProjects"
       >
         <span>项目管理</span>
         <small>{{ loading ? '正在加载' : `${projects.length} 个项目` }}</small>
@@ -686,9 +913,31 @@ onBeforeUnmount(clearMessage)
                 <h2>文件</h2>
                 <p>{{ loadingFiles ? '正在加载' : `${files.length} 个文件` }}</p>
               </div>
-              <div class="upload-actions">
-                <button type="button" :disabled="uploadDisabled" @click="triggerFileInput">上传文件</button>
-                <button type="button" :disabled="uploadDisabled" @click="triggerFolderInput">上传文件夹</button>
+              <div class="file-management-actions">
+                <div v-if="files.length > 0" class="bulk-file-actions" aria-label="批量文件操作">
+                  <span v-if="selectedFileCount > 0">已选 {{ selectedFileCount }} 个</span>
+                  <button
+                    class="secondary-button bulk-download-button"
+                    type="button"
+                    :disabled="selectedDownloadDisabled"
+                    @click="handleDownloadSelectedFiles"
+                  >
+                    {{ downloadingSelectedFiles ? '下载中' : '批量下载' }}
+                  </button>
+                  <button
+                    class="danger-button bulk-delete-button"
+                    type="button"
+                    :disabled="batchDeleteDisabled"
+                    @click="handleDeleteSelectedFiles"
+                  >
+                    {{ bulkDeletingFiles ? '删除中' : '批量删除' }}
+                  </button>
+                </div>
+                <div class="upload-actions">
+                  <a v-if="files.length > 0" class="secondary-action" :href="projectArchiveUrl(selectedProject)">下载整个项目</a>
+                  <button type="button" :disabled="uploadDisabled" @click="triggerFileInput">上传文件</button>
+                  <button type="button" :disabled="uploadDisabled" @click="triggerFolderInput">上传文件夹</button>
+                </div>
               </div>
             </div>
 
@@ -715,8 +964,14 @@ onBeforeUnmount(clearMessage)
               v-else-if="files.length > 0"
               :files="files"
               :project-slug="selectedProject.slug"
+              preview-route-name="space-project-file-preview"
+              :preview-route-params="{ projectId: selectedProject.id }"
+              v-model:selected-file-ids="selectedFileIds"
+              selectable
               can-move
               can-delete
+              :actions-disabled="bulkDeletingFiles"
+              :selection-disabled="bulkDeletingFiles || downloadingSelectedFiles"
               :moving-file-id="movingFileId"
               :deleting-file-id="deletingFileId"
               @move="openMoveFileDialog"

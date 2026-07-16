@@ -1,5 +1,5 @@
 import { http } from './http'
-import type { ApiResponse, FileView, ProjectIssueView, ProjectView } from './types'
+import type { ApiResponse, FileView, ProjectIssueView, ProjectView, SpaceUploadLimitView } from './types'
 import { unwrap } from './types'
 
 export interface ProjectForm {
@@ -38,6 +38,20 @@ export async function getSpaceProjectFiles(projectId: number): Promise<FileView[
 export async function getSpaceProjectIssues(projectId: number): Promise<ProjectIssueView[]> {
   const response = await http.get<ApiResponse<ProjectIssueView[]>>(`/space/projects/${projectId}/issues`)
   return unwrap(response.data)
+}
+
+export async function getSpaceUploadLimits(): Promise<SpaceUploadLimitView> {
+  const response = await http.get<ApiResponse<SpaceUploadLimitView>>('/space/upload-limits')
+  return unwrap(response.data)
+}
+
+export async function downloadSpaceProjectFilesArchive(projectId: number, fileIds: number[]): Promise<Blob> {
+  const response = await http.post<Blob>(
+    `/space/projects/${projectId}/files/archive`,
+    { fileIds },
+    { responseType: 'blob', timeout: 0 },
+  )
+  return response.data
 }
 
 export async function uploadSpaceProjectFile(projectId: number, file: File, relativePath?: string): Promise<FileView> {

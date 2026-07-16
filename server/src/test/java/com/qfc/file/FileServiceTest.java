@@ -15,12 +15,17 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.springframework.mock.web.MockMultipartFile;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -356,6 +361,89 @@ class FileServiceTest {
     }
 
     @Test
+    void publicProjectArchivePreservesRelativePaths() throws Exception {
+        Project project = new Project();
+        project.setId(7L);
+        project.setSlug("docs");
+        when(projectMapper.selectPublicBySlug("docs")).thenReturn(project);
+        ProjectFile readme = projectFile(3L, 7L, "README.md", "projects/7/README.md");
+        ProjectFile image = projectFile(4L, 7L, "docs/images/logo.png", "projects/7/docs/images/logo.png");
+        when(projectFileMapper.selectByProjectId(7L)).thenReturn(Arrays.asList(readme, image));
+        Files.createDirectories(tempDir.resolve("projects/7/docs/images"));
+        Files.write(tempDir.resolve("projects/7/README.md"), "# QFC".getBytes(StandardCharsets.UTF_8));
+        Files.write(tempDir.resolve("projects/7/docs/images/logo.png"), "png".getBytes(StandardCharsets.UTF_8));
+
+        FileArchive archive = fileService.openPublicProjectArchive("docs");
+        Map<String, String> entries = archiveEntries(archive);
+
+        assertEquals("docs.zip", archive.getOriginalName());
+        assertEquals("application/zip", archive.getMimeType());
+        assertEquals("# QFC", entries.get("README.md"));
+        assertEquals("png", entries.get("docs/images/logo.png"));
+    }
+
+    @Test
+    void publicSelectedProjectArchiveIncludesOnlyRequestedFiles() throws Exception {
+        Project project = new Project();
+        project.setId(7L);
+        project.setSlug("docs");
+        when(projectMapper.selectPublicBySlug("docs")).thenReturn(project);
+        ProjectFile readme = projectFile(3L, 7L, "README.md", "projects/7/README.md");
+        ProjectFile image = projectFile(4L, 7L, "docs/images/logo.png", "projects/7/docs/images/logo.png");
+        when(projectFileMapper.selectByProjectId(7L)).thenReturn(Arrays.asList(readme, image));
+        Files.createDirectories(tempDir.resolve("projects/7/docs/images"));
+        Files.write(tempDir.resolve("projects/7/README.md"), "# QFC".getBytes(StandardCharsets.UTF_8));
+        Files.write(tempDir.resolve("projects/7/docs/images/logo.png"), "png".getBytes(StandardCharsets.UTF_8));
+
+        FileArchive archive = fileService.openPublicSelectedProjectFilesArchive("docs", Arrays.asList(4L));
+        Map<String, String> entries = archiveEntries(archive);
+
+        assertEquals("docs-selected.zip", archive.getOriginalName());
+        assertEquals(1, entries.size());
+        assertEquals("png", entries.get("docs/images/logo.png"));
+    }
+
+    @Test
+    void ownedSelectedProjectArchiveIncludesOnlyRequestedFiles() throws Exception {
+        Project project = new Project();
+        project.setId(7L);
+        project.setOwnerUserId(5L);
+        project.setSlug("docs");
+        when(projectMapper.selectById(7L)).thenReturn(project);
+        ProjectFile readme = projectFile(3L, 7L, "README.md", "projects/7/README.md");
+        ProjectFile image = projectFile(4L, 7L, "docs/images/logo.png", "projects/7/docs/images/logo.png");
+        when(projectFileMapper.selectByProjectId(7L)).thenReturn(Arrays.asList(readme, image));
+        Files.createDirectories(tempDir.resolve("projects/7/docs/images"));
+        Files.write(tempDir.resolve("projects/7/README.md"), "# QFC".getBytes(StandardCharsets.UTF_8));
+        Files.write(tempDir.resolve("projects/7/docs/images/logo.png"), "png".getBytes(StandardCharsets.UTF_8));
+
+        FileArchive archive = fileService.openOwnedSelectedProjectFilesArchive(5L, 7L, Arrays.asList(4L));
+        Map<String, String> entries = archiveEntries(archive);
+
+        assertEquals("docs-selected.zip", archive.getOriginalName());
+        assertEquals(1, entries.size());
+        assertEquals("png", entries.get("docs/images/logo.png"));
+    }
+
+    @Test
+    void ownedSelectedProjectArchiveRejectsUnknownFileIds() {
+        Project project = new Project();
+        project.setId(7L);
+        project.setOwnerUserId(5L);
+        project.setSlug("docs");
+        when(projectMapper.selectById(7L)).thenReturn(project);
+        ProjectFile readme = projectFile(3L, 7L, "README.md", "projects/7/README.md");
+        when(projectFileMapper.selectByProjectId(7L)).thenReturn(Arrays.asList(readme));
+
+        ApiException exception = assertThrows(
+            ApiException.class,
+            () -> fileService.openOwnedSelectedProjectFilesArchive(5L, 7L, Arrays.asList(3L, 99L))
+        );
+
+        assertEquals("FILE_NOT_FOUND", exception.getCode());
+    }
+
+    @Test
     void previewMarkdownReadsStoredContent() throws Exception {
         Path stored = tempDir.resolve("projects/7/readme.md");
         Files.createDirectories(stored.getParent());
@@ -424,6 +512,38 @@ class FileServiceTest {
     }
 
     @Test
+    void previewMarkdownRewritesWindowsLocalImagePathToUploadedProjectAsset() throws Exception {
+        Path stored = tempDir.resolve("projects/7/guide.md");
+        Files.createDirectories(stored.getParent());
+        Files.write(
+            stored,
+            "![Deploy](C:/Users/Administrator/Desktop/docs/image/image-20260711165630032.png)"
+                .getBytes(StandardCharsets.UTF_8)
+        );
+        ProjectFile markdown = new ProjectFile();
+        markdown.setId(3L);
+        markdown.setProjectId(7L);
+        markdown.setOriginalName("guide.md");
+        markdown.setStoragePath("projects/7/guide.md");
+        markdown.setRelativePath("guide.md");
+        markdown.setPreviewType("MARKDOWN");
+        ProjectFile asset = new ProjectFile();
+        asset.setId(4L);
+        asset.setProjectId(7L);
+        asset.setOriginalName("image-20260711165630032.png");
+        asset.setStoragePath("projects/7/image/image-20260711165630032.png");
+        asset.setRelativePath("image/image-20260711165630032.png");
+        when(projectFileMapper.selectById(3L)).thenReturn(markdown);
+        when(projectFileMapper.selectByProjectIdAndRelativePath(7L, "image/image-20260711165630032.png")).thenReturn(asset);
+
+        FilePreview preview = fileService.previewFile(3L);
+
+        assertTrue(preview.getContent().contains(
+            "![Deploy](/api/public/files/3/assets?path=image%2Fimage-20260711165630032.png)"
+        ));
+    }
+
+    @Test
     void previewMarkdownRewritesHtmlImageSrcFromMarkdownDirectory() throws Exception {
         Path stored = tempDir.resolve("projects/7/docs/README.md");
         Files.createDirectories(stored.getParent());
@@ -482,5 +602,39 @@ class FileServiceTest {
         ApiException exception = assertThrows(ApiException.class, () -> fileService.previewFile(404L));
 
         assertEquals("FILE_NOT_FOUND", exception.getCode());
+    }
+
+    private ProjectFile projectFile(Long id, Long projectId, String relativePath, String storagePath) {
+        ProjectFile file = new ProjectFile();
+        file.setId(id);
+        file.setProjectId(projectId);
+        file.setOriginalName(relativePath.substring(relativePath.lastIndexOf('/') + 1));
+        file.setMimeType("application/octet-stream");
+        file.setStoragePath(storagePath);
+        file.setRelativePath(relativePath);
+        file.setPreviewType("DOWNLOAD_ONLY");
+        return file;
+    }
+
+    private Map<String, String> archiveEntries(FileArchive archive) throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        fileService.writeArchive(archive, output);
+        Map<String, String> entries = new LinkedHashMap<String, String>();
+        try (ZipInputStream zip = new ZipInputStream(new java.io.ByteArrayInputStream(output.toByteArray()))) {
+            ZipEntry entry = zip.getNextEntry();
+            while (entry != null) {
+                ByteArrayOutputStream entryBytes = new ByteArrayOutputStream();
+                byte[] buffer = new byte[256];
+                int read = zip.read(buffer);
+                while (read >= 0) {
+                    entryBytes.write(buffer, 0, read);
+                    read = zip.read(buffer);
+                }
+                entries.put(entry.getName(), new String(entryBytes.toByteArray(), StandardCharsets.UTF_8));
+                zip.closeEntry();
+                entry = zip.getNextEntry();
+            }
+        }
+        return entries;
     }
 }

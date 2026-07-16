@@ -15,13 +15,32 @@ const router = createRouter({
     { path: '/p/:slug/issues/new', name: 'project-issue-new', component: () => import('../views/ProjectView.vue') },
     { path: '/p/:slug/files/:fileId', name: 'file-preview', component: () => import('../views/FilePreviewView.vue') },
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue') },
-    { path: '/space', name: 'space', component: () => import('../views/SpaceView.vue') },
+    { path: '/space', redirect: '/space/account' },
+    { path: '/space/account', name: 'space-account', component: () => import('../views/SpaceView.vue') },
+    { path: '/space/projects', name: 'space-projects', component: () => import('../views/SpaceView.vue') },
+    { path: '/space/projects/:projectId/files', name: 'space-project-files', component: () => import('../views/SpaceView.vue') },
+    { path: '/space/projects/:projectId/edit', name: 'space-project-edit', component: () => import('../views/SpaceView.vue') },
+    {
+      path: '/space/projects/:projectId/files/:fileId/preview',
+      name: 'space-project-file-preview',
+      component: () => import('../views/FilePreviewView.vue'),
+    },
+    {
+      path: '/space/projects/:projectId/visitor/:slug',
+      name: 'space-project-visitor',
+      component: () => import('../views/ProjectView.vue'),
+    },
+    {
+      path: '/space/projects/:projectId/visitor/:slug/issues/new',
+      name: 'space-project-visitor-issue-new',
+      component: () => import('../views/ProjectView.vue'),
+    },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 
 router.beforeEach(async (to) => {
-  const protectedRoute = to.path === '/space'
+  const protectedRoute = to.path === '/space' || to.path.startsWith('/space/')
   if (!protectedRoute) {
     return true
   }

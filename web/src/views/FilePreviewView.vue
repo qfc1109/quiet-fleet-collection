@@ -9,7 +9,17 @@ import { renderMarkdownWithToc } from '../utils/markdownToc'
 const route = useRoute()
 const router = useRouter()
 const fileId = computed(() => String(route.params.fileId || ''))
-const projectPath = computed(() => `/p/${String(route.params.slug || '')}`)
+const slug = computed(() => String(route.params.slug || ''))
+const spaceProjectId = computed(() => String(route.params.projectId || ''))
+const spaceProjectFilePreview = computed(() => route.name === 'space-project-file-preview')
+const projectRoute = computed(() => ({
+  name: 'project',
+  params: { slug: slug.value },
+}))
+const spaceProjectManagementRoute = computed(() => ({
+  name: 'space-project-files',
+  params: { projectId: spaceProjectId.value },
+}))
 const preview = ref<FilePreview | null>(null)
 const loading = ref(true)
 const error = ref('')
@@ -26,7 +36,11 @@ const markdownHeadings = computed(() => markdownRender.value.headings)
 const showMarkdownToc = computed(() => preview.value?.previewType === 'MARKDOWN' && markdownHeadings.value.length > 0)
 
 function goBack() {
-  router.push(projectPath.value)
+  if (spaceProjectFilePreview.value && spaceProjectId.value) {
+    router.push(spaceProjectManagementRoute.value)
+    return
+  }
+  router.push(projectRoute.value)
 }
 
 async function loadPreview() {
@@ -68,6 +82,7 @@ watch(fileId, loadPreview)
           {{ heading.text }}
         </a>
       </nav>
+      <a v-if="preview" class="secondary-action markdown-toc-download" :href="preview.downloadUrl">下载</a>
     </aside>
 
     <div class="preview-box">
@@ -94,7 +109,7 @@ watch(fileId, loadPreview)
         <div v-else class="download-only">
           <p>这个文件暂不支持在线预览。</p>
         </div>
-        <a class="secondary-action" :href="preview.downloadUrl">下载</a>
+        <a v-if="!showMarkdownToc" class="secondary-action preview-download-button" :href="preview.downloadUrl">下载</a>
       </template>
     </div>
   </section>
