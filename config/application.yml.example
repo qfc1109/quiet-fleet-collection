@@ -1,0 +1,22 @@
+# Copy this file to config/application.yml when external overrides are needed.
+# MySQL connection values come from config/mysql.env or deployment environment variables.
+qfc:
+  datasource:
+    site:
+      url: jdbc:mysql://${QFC_MYSQL_HOST}:${QFC_MYSQL_PORT}/qfc_site?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: ${QFC_MYSQL_USERNAME}
+      password: ${QFC_MYSQL_PASSWORD}
+    site-log:
+      url: jdbc:mysql://${QFC_MYSQL_HOST}:${QFC_MYSQL_PORT}/qfc_site_log?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: ${QFC_MYSQL_USERNAME}
+      password: ${QFC_MYSQL_PASSWORD}
+    admin:
+      url: jdbc:mysql://${QFC_MYSQL_HOST}:${QFC_MYSQL_PORT}/qfc_admin?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: ${QFC_MYSQL_USERNAME}
+      password: ${QFC_MYSQL_PASSWORD}
+    admin-log:
+      url: jdbc:mysql://${QFC_MYSQL_HOST}:${QFC_MYSQL_PORT}/qfc_admin_log?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: ${QFC_MYSQL_USERNAME}
+      password: ${QFC_MYSQL_PASSWORD}
+  storage:
+    root: ./storage

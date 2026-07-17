@@ -51,6 +51,8 @@ pnpm-debug.log*
 *.local
 config/application-local.yml
 config/mysql-client.cnf
+config/application.yml
+config/mysql.env
 application-local.yml
 application-local.yaml
 application-local.properties
@@ -60,9 +62,8 @@ server/src/main/resources/application-local.properties
 
 # Keep checked-in examples.
 !*.example
-!config/application-local.yml.example
-!config/mysql-client.cnf.example
-!server/src/main/resources/application-local.yml.example
+!config/application.yml.example
+!config/mysql.env.example
 
 # IDE
 .idea/

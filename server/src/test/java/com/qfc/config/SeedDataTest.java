@@ -22,5 +22,8 @@ class SeedDataTest {
         assertTrue(sql.contains("INSERT INTO admin_user"));
         assertTrue(sql.contains("'admin'"));
         assertTrue(sql.contains("'$2a$10$gZpEOHdFL.moqMkEGGAV.u6T3OCE4uV3OQRMcmEG76SHJBlvcoFMy'"));
+        assertTrue(sql.contains("'轻帆管理员'"));
+        assertTrue(sql.contains("'轻帆集第一版网站账号'"));
+        assertTrue(sql.contains("'轻帆集第一版管理员账号'"));
     }
 }

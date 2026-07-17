@@ -9,6 +9,10 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $logRoot = Join-Path $repoRoot 'logs'
 $serverRoot = Join-Path $repoRoot 'server'
 $repoPattern = [regex]::Escape($repoRoot)
+$applicationConfig = Join-Path $repoRoot 'config\application.yml'
+$mysqlEnvironment = Join-Path $repoRoot 'config\mysql.env'
+
+. (Join-Path $PSScriptRoot 'mysql-env.ps1')
 
 function Resolve-Tool {
     param([string]$Name)
@@ -68,6 +72,12 @@ function Stop-QfcBackendOnPort {
 if (-not $SkipLogOrganize) {
     & (Join-Path $PSScriptRoot 'organize-logs.ps1') -LogRoot $logRoot
 }
+
+$mysqlSettings = Import-QfcMysqlEnvironment -Path $mysqlEnvironment
+if (-not (Test-Path -LiteralPath $applicationConfig)) {
+    throw ("Application configuration does not exist: {0}. Run scripts\setup-dev.bat first." -f $applicationConfig)
+}
+Write-Host ("[OK] Loaded MySQL configuration: {0}:{1}" -f $mysqlSettings.Host, $mysqlSettings.Port)
 
 $mvn = Resolve-Tool 'mvn'
 

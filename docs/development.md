@@ -107,40 +107,30 @@ qfc_admin      后台管理库，保存 admin_user、admin_role、permission、a
 qfc_admin_log  后台日志库，保存 admin_login_log、admin_operation_log、admin_console_log
 ```
 
-后端本地真实配置放在 `config/application-local.yml`，该文件已被 `.gitignore` 忽略，不提交。可提交模板是：
+后端使用两个通用名称的外部配置文件，它们都已被 `.gitignore` 忽略，不提交：
 
 ```text
-config/application-local.yml.example
+config/application.yml
+config/mysql.env
 ```
 
-本地配置中只需要在 `qfc.local.db` 填一次账号密码，四个数据源通过 YAML 锚点复用：
+可提交模板是：
 
-```yaml
-qfc:
-  local:
-    db:
-      username: &qfc_db_username root
-      password: &qfc_db_password "<your-password>"
-  datasource:
-    site:
-      url: jdbc:mysql://[::1]:3306/qfc_site?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
-      username: *qfc_db_username
-      password: *qfc_db_password
-    site-log:
-      url: jdbc:mysql://[::1]:3306/qfc_site_log?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
-      username: *qfc_db_username
-      password: *qfc_db_password
-    admin:
-      url: jdbc:mysql://[::1]:3306/qfc_admin?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
-      username: *qfc_db_username
-      password: *qfc_db_password
-    admin-log:
-      url: jdbc:mysql://[::1]:3306/qfc_admin_log?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
-      username: *qfc_db_username
-      password: *qfc_db_password
-  storage:
-    root: ./storage
+```text
+config/application.yml.example
+config/mysql.env.example
 ```
+
+MySQL 地址和账号只在 `config/mysql.env` 中维护一次：
+
+```dotenv
+QFC_MYSQL_HOST=127.0.0.1
+QFC_MYSQL_PORT=3306
+QFC_MYSQL_USERNAME=root
+QFC_MYSQL_PASSWORD=<your-password>
+```
+
+`config/application.yml` 通过 `${QFC_MYSQL_*}` 环境变量配置四个数据源。`start-dev.ps1` 和 `restart-backend.ps1` 会先加载 `mysql.env`，再启动 Spring Boot。该文件既可以指向本机 MySQL，也可以指向远程 MySQL。
 
 主站和后台是两个独立网站，不通过前端导航互跳。主站不展示后台入口，后台也不展示打开主站入口；需要进入后台时直接访问后台站点地址。
 
@@ -156,7 +146,7 @@ password: 空
 storage root: ./storage
 ```
 
-如果数据库端口、库名、账号或文件存储目录不同，改 `config/application-local.yml` 对应字段即可。不要把真实账号密码写入可提交文件。
+如果数据库地址、端口或账号不同，修改 `config/mysql.env`。如果库名或文件存储目录不同，修改 `config/application.yml`。不要把真实账号密码写入可提交文件。
 
 建表和初始化账号脚本：
 
@@ -166,6 +156,7 @@ server/src/main/resources/db/data.sql
 server/src/main/resources/db/migration-2026-07-02-four-database-split.sql
 server/src/main/resources/db/migration-2026-07-02-space-project-owner.sql
 server/src/main/resources/db/migration-2026-07-11-project-active-slug.sql
+server/src/main/resources/db/migration-2026-07-12-repair-seed-text.sql
 ```
 
 `data.sql` 初始化网站用户账号和后台管理员账号：
@@ -192,23 +183,35 @@ password: 123456
 
 密码入库时使用 BCrypt hash，不保存明文。
 
-使用命令行导入 SQL 前，先从 `config/mysql-client.cnf.example` 复制一份 `config/mysql-client.cnf`，并在该本机配置里填写 MySQL 连接信息。`config/mysql-client.cnf` 已被 `.gitignore` 忽略，不提交。
+使用命令行导入 SQL 前，先加载 `config/mysql.env`：
+
+```powershell
+. .\scripts\mysql-env.ps1
+$mysql = Import-QfcMysqlEnvironment -Path ".\config\mysql.env"
+$env:MYSQL_PWD = $mysql.Password
+$mysqlArgs = @(
+  '--no-defaults',
+  "--host=$($mysql.Host)",
+  "--port=$($mysql.Port)",
+  "--user=$($mysql.Username)"
+)
+```
 
 全新初始化时先执行 `schema.sql`，再执行 `data.sql`。两个脚本内部会切换到对应数据库：
 
 ```powershell
 Get-Content -LiteralPath 'server/src/main/resources/db/schema.sql' -Raw |
-  mysql --defaults-extra-file=config/mysql-client.cnf
+  & mysql @mysqlArgs
 
 Get-Content -LiteralPath 'server/src/main/resources/db/data.sql' -Raw |
-  mysql --defaults-extra-file=config/mysql-client.cnf
+  & mysql @mysqlArgs
 ```
 
 如果本地数据库已经执行过旧版单库 `schema.sql`，需要在旧库上执行四库拆分迁移脚本。该脚本会从当前连接的旧库复制 `user_account`、`project`、`project_file`、角色和权限数据到四个新库：
 
 ```powershell
 Get-Content -LiteralPath 'server/src/main/resources/db/migration-2026-07-02-four-database-split.sql' -Raw |
-  mysql --defaults-extra-file=config/mysql-client.cnf quiet_fleet_collection
+  & mysql @mysqlArgs quiet_fleet_collection
 ```
 
 迁移内容：
@@ -224,14 +227,14 @@ Get-Content -LiteralPath 'server/src/main/resources/db/migration-2026-07-02-four
 
 ```powershell
 Get-Content -LiteralPath 'server/src/main/resources/db/migration-2026-07-02-space-project-owner.sql' -Raw |
-  mysql --defaults-extra-file=config/mysql-client.cnf
+  & mysql @mysqlArgs
 ```
 
 如果本地项目表仍使用旧的 `UNIQUE KEY uk_project_slug (slug)`，需要继续执行访问路径软删除迁移脚本。该脚本会移除旧唯一键，新增 `active_slug` 生成列，并只对未删除项目的访问路径做唯一约束：
 
 ```powershell
 Get-Content -LiteralPath 'server/src/main/resources/db/migration-2026-07-11-project-active-slug.sql' -Raw |
-  mysql --defaults-extra-file=config/mysql-client.cnf
+  & mysql @mysqlArgs
 ```
 
 ## 本地文件存储
@@ -485,11 +488,12 @@ Windows 本地优先使用可双击脚本：
 
 ```text
 scripts\start-dev.bat
+scripts\stop-dev.bat
 scripts\restart-backend.bat
 scripts\organize-logs.bat
 ```
 
-其中 `start-dev.bat` 会启动后端、主站前端和后台前端，并在启动前清理本项目占用 `8081/5173/5174` 的旧进程；`restart-backend.bat` 只重启后端，适合后端代码或配置修改后快速刷新；`organize-logs.bat` 只整理旧日志。
+其中 `start-dev.bat` 会重启后端、主站前端和后台前端，并在启动后检查端口和数据库接口；`stop-dev.bat` 停止三个服务；`restart-backend.bat` 只重启后端；`organize-logs.bat` 只整理旧日志。
 
 后端启动命令：
 
@@ -497,7 +501,7 @@ scripts\organize-logs.bat
 mvn -f server/pom.xml -Dspring-boot.run.arguments=--spring.config.additional-location=file:../config/ spring-boot:run
 ```
 
-说明：本机数据库账号密码读取 `config/application-local.yml`。当前后端默认端口为 `8081`，四个数据库 URL 默认指向 `[::1]:3306` 下的 `qfc_site`、`qfc_site_log`、`qfc_admin`、`qfc_admin_log`；如果端口或库名不同，修改 `config/application-local.yml`。
+说明：MySQL 地址和账号读取 `config/mysql.env`，通用应用配置读取 `config/application.yml`。当前后端默认端口为 `8081`，四个数据库分别为 `qfc_site`、`qfc_site_log`、`qfc_admin`、`qfc_admin_log`。
 
 验证结果：通过，Spring Boot 已在 `http://127.0.0.1:8081` 启动，并连通本机 Docker MySQL 5.7。
 

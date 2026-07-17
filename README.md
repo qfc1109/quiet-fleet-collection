@@ -8,7 +8,7 @@
 - `web/`：Vue 3 + Vite 主站前端。
 - `admin-web/`：Vue 3 + Vite + Element Plus 后台前端。
 - `config/`：本机数据库和运行配置。
-- `scripts/`：Windows 本地启动和日志整理脚本。
+- `scripts/`：Windows 本地初始化、重启、停止和日志整理脚本。
 - `docs/`：设计、开发和进度文档。
 
 ## 环境要求
@@ -30,103 +30,166 @@
 
 请先进入项目根目录，再执行以下命令。
 
-### 1. 初始化数据库
+### 1. 初始化开发环境
 
-复制 MySQL 客户端配置：
+首次拉取项目后，推荐双击运行：
+
+```text
+scripts\setup-dev.bat
+```
+
+也可以在终端执行：
 
 ```cmd
-copy "config\mysql-client.cnf.example" "config\mysql-client.cnf"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\setup-dev.ps1"
 ```
 
-修改 `config/mysql-client.cnf`：
+初始化脚本会：
 
-```ini
-[client]
-host=::1
-port=3306
-user=root
-password=<your-password>
+- 检查 Java、Maven、Node.js、npm 和 MySQL。
+- 安装 `web/` 和 `admin-web/` 的 npm 依赖。
+- 创建本地 `logs/` 和 `storage/` 目录。
+- 缺少数据库配置时，生成 `config/application.yml`，并交互创建唯一的 MySQL 配置 `config/mysql.env`。
+- 检查项目所需的 4 个数据库和关键表。
+- 发现数据库或表缺失时，询问是否执行建表和初始数据脚本。
+
+MySQL 密码使用隐藏输入。`config/application.yml` 和 `config/mysql.env` 已被 `.gitignore` 忽略，不要提交。`mysql.env` 可以配置本机或远程 MySQL。
+
+### 2. 重启项目
+
+日常开发推荐双击：
+
+```text
+scripts\start-dev.bat
 ```
 
-执行建表和初始化数据：
+虽然文件名保留为 `start-dev`，实际行为是重启全部开发服务：
+
+1. 检查后端、主站和后台是否正在运行。
+2. 停止当前项目占用 `8081`、`5173`、`5174` 的旧进程。
+3. 重新启动三个服务。
+4. 等待端口开始监听，并输出成功或失败结果。
+
+启动后，同一局域网内的用户应通过运行服务这台电脑的内网 IPv4 地址访问。当前 WLAN 内网地址示例为 `192.168.31.189`：
+
+```text
+主站: http://192.168.31.189:5173/
+后台: http://192.168.31.189:5174/
+后端: http://192.168.31.189:8081
+```
+
+内网 IP 可能因 DHCP 重新分配而变化，可以执行以下命令查看当前地址：
+
+```powershell
+ipconfig
+```
+
+找到当前使用的以太网或 WLAN 网卡对应的“IPv4 地址”，然后使用：
+
+```text
+主站: http://<本机内网IP>:5173/
+后台: http://<本机内网IP>:5174/
+后端: http://<本机内网IP>:8081
+```
+
+`127.0.0.1` 只能由运行服务的电脑自己访问。其他内网用户无法访问时，需要确认双方处于同一局域网，并允许 Windows 防火墙放行 TCP `5173`、`5174`、`8081` 端口。管理后台和后端接口仍需要依赖项目自身的登录与权限校验，不能把内网环境视为安全边界。
+
+### 3. 停止项目
+
+双击运行：
+
+```text
+scripts\stop-dev.bat
+```
+
+停止脚本只会结束当前仓库的后端、主站和后台进程。如果端口被其他程序占用，脚本会报错并拒绝误杀。
+
+### 4. 手工初始化数据库
+
+如果不使用 `setup-dev.bat`，可以按下面的步骤手工初始化。
+
+复制配置模板：
 
 ```cmd
-mysql --defaults-extra-file=config/mysql-client.cnf < server\src\main\resources\db\schema.sql
-mysql --defaults-extra-file=config/mysql-client.cnf < server\src\main\resources\db\data.sql
+copy "config\application.yml.example" "config\application.yml"
+copy "config\mysql.env.example" "config\mysql.env"
 ```
 
-### 2. 配置后端数据库连接
+只需要修改 `config/mysql.env` 中的 MySQL 连接信息：
 
-复制本机配置：
-
-```cmd
-copy "config\application-local.yml.example" "config\application-local.yml"
+```dotenv
+QFC_MYSQL_HOST=127.0.0.1
+QFC_MYSQL_PORT=3306
+QFC_MYSQL_USERNAME=root
+QFC_MYSQL_PASSWORD=<your-password>
 ```
 
-修改 `config/application-local.yml` 里的数据库账号密码：
+加载环境变量并执行建表和初始化数据：
 
-```yaml
-qfc:
-  local:
-    db:
-      username: &qfc_db_username root
-      password: &qfc_db_password "<your-password>"
+```powershell
+. .\scripts\mysql-env.ps1
+$mysql = Import-QfcMysqlEnvironment -Path ".\config\mysql.env"
+$env:MYSQL_PWD = $mysql.Password
+Get-Content ".\server\src\main\resources\db\schema.sql" -Raw |
+  mysql --no-defaults --host=$($mysql.Host) --port=$($mysql.Port) --user=$($mysql.Username)
+Get-Content ".\server\src\main\resources\db\data.sql" -Raw |
+  mysql --no-defaults --host=$($mysql.Host) --port=$($mysql.Port) --user=$($mysql.Username)
+Remove-Item Env:MYSQL_PWD
 ```
 
-`config/application-local.yml` 和 `config/mysql-client.cnf` 都是本机配置文件，已被 `.gitignore` 忽略，不要提交。
+`config/application.yml` 使用 `${QFC_MYSQL_*}` 占位符，Spring Boot 启动前由脚本加载 `config/mysql.env`。数据库地址、端口、账号和密码只维护一份。
 
-### 3. 安装前端依赖
+安装前端依赖：
 
 ```cmd
 npm --prefix ".\web" install
 npm --prefix ".\admin-web" install
 ```
 
-### 4. 启动项目
+## 脚本说明
 
-推荐用脚本启动三端：
+### `scripts/setup-dev.ps1`
+
+用途：首次初始化或补全本机开发环境。
+
+- 检查必需的开发工具。
+- 安装两个前端的 npm 依赖。
+- 创建本地运行目录和数据库配置。
+- 连接失败时允许重新输入并覆盖错误的 `mysql.env`。
+- 只在数据库或关键表缺失时询问执行初始化 SQL。
 
 ```cmd
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\start-dev.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\setup-dev.ps1"
+```
+
+可选参数：
+
+```powershell
+# 跳过 npm install
+.\scripts\setup-dev.ps1 -SkipNpmInstall
+
+# 跳过数据库检查和初始化
+.\scripts\setup-dev.ps1 -SkipDatabaseInit
 ```
 
 也可以双击运行：
 
 ```text
-scripts\start-dev.bat
+scripts\setup-dev.bat
 ```
-
-只重启后端：
-
-```text
-scripts\restart-backend.bat
-```
-
-只整理旧日志：
-
-```text
-scripts\organize-logs.bat
-```
-
-启动后访问：
-
-```text
-主站: http://127.0.0.1:5173/
-后台: http://127.0.0.1:5174/
-后端: http://127.0.0.1:8081
-```
-
-## 脚本说明
 
 ### `scripts/start-dev.ps1`
 
 用途：
 
-- 启动后端 Spring Boot 服务。
-- 启动主站 Vite 服务。
-- 启动后台 Vite 服务。
+- 检查并停止当前项目已有的开发服务。
+- 重新启动后端 Spring Boot 服务。
+- 重新启动主站和后台 Vite 服务。
+- 等待 `8081`、`5173`、`5174` 端口开始监听。
+- 调用项目列表接口验证后端和数据库连接。
+- 进程提前退出或启动超时时，输出对应日志路径并返回失败。
 - 启动前整理旧日志。
-- 后端自动加载 `config/application-local.yml`。
+- 后端自动加载 `config/mysql.env` 和 `config/application.yml`。
 - 后端日志写到项目根目录 `logs/`。
 
 在 `cmd` 中执行：
@@ -151,6 +214,20 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ```powershell
 .\scripts\start-dev.ps1
+```
+
+### `scripts/stop-dev.ps1`
+
+用途：停止当前仓库的后端、主站和后台开发服务，并清理残留的 Maven、Java、npm 和 Vite 进程。
+
+```cmd
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\stop-dev.ps1"
+```
+
+也可以双击运行：
+
+```text
+scripts\stop-dev.bat
 ```
 
 ### `scripts/restart-backend.ps1`

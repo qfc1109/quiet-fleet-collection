@@ -11,8 +11,6 @@ server:
 spring:
   application:
     name: quiet-fleet-collection
-  profiles:
-    active: local
   servlet:
     multipart:
       max-file-size: 50MB
@@ -26,24 +24,24 @@ qfc:
   datasource:
     site:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://localhost:3306/qfc_site?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
-      username: root
-      password: ""
+      url: jdbc:mysql://${QFC_MYSQL_HOST:localhost}:${QFC_MYSQL_PORT:3306}/qfc_site?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: ${QFC_MYSQL_USERNAME:root}
+      password: ${QFC_MYSQL_PASSWORD:}
     site-log:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://localhost:3306/qfc_site_log?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
-      username: root
-      password: ""
+      url: jdbc:mysql://${QFC_MYSQL_HOST:localhost}:${QFC_MYSQL_PORT:3306}/qfc_site_log?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: ${QFC_MYSQL_USERNAME:root}
+      password: ${QFC_MYSQL_PASSWORD:}
     admin:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://localhost:3306/qfc_admin?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
-      username: root
-      password: ""
+      url: jdbc:mysql://${QFC_MYSQL_HOST:localhost}:${QFC_MYSQL_PORT:3306}/qfc_admin?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: ${QFC_MYSQL_USERNAME:root}
+      password: ${QFC_MYSQL_PASSWORD:}
     admin-log:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://localhost:3306/qfc_admin_log?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
-      username: root
-      password: ""
+      url: jdbc:mysql://${QFC_MYSQL_HOST:localhost}:${QFC_MYSQL_PORT:3306}/qfc_admin_log?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: ${QFC_MYSQL_USERNAME:root}
+      password: ${QFC_MYSQL_PASSWORD:}
   storage:
     root: ./storage
   auth:
