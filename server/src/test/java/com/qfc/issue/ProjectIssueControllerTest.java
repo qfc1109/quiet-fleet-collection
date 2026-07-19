@@ -3,6 +3,10 @@ package com.qfc.issue;
 import com.qfc.auth.LoginUser;
 import com.qfc.auth.LoginSessionProperties;
 import com.qfc.auth.LoginSessionService;
+import com.qfc.auth.ActiveSessionRepository;
+import com.qfc.auth.AuthService;
+import com.qfc.auth.CurrentUserResolver;
+import com.qfc.auth.JwtTokenProvider;
 import com.qfc.common.ApiException;
 import com.qfc.common.ApiResponse;
 import com.qfc.config.SessionKeys;
@@ -27,13 +31,23 @@ class ProjectIssueControllerTest {
     @Mock
     private ProjectIssueService projectIssueService;
 
+    @Mock
+    private ActiveSessionRepository activeSessionRepository;
+
+    @Mock
+    private AuthService authService;
+
+    @Mock
+    private JwtTokenProvider jwtTokenProvider;
+
     private ProjectIssueController controller;
 
     @BeforeEach
     void setUp() {
         LoginSessionProperties properties = new LoginSessionProperties();
         properties.setSessionLifetimeSeconds(86400);
-        controller = new ProjectIssueController(projectIssueService, new LoginSessionService(properties));
+        LoginSessionService loginSessionService = new LoginSessionService(properties, activeSessionRepository);
+        controller = new ProjectIssueController(projectIssueService, new CurrentUserResolver(jwtTokenProvider, authService, loginSessionService));
     }
 
     @Test
@@ -62,6 +76,7 @@ class ProjectIssueControllerTest {
         request.setContent("希望补充完整配置说明。");
         ProjectIssueView view = new ProjectIssueView();
         view.setId(51L);
+        when(authService.currentUser(5L, "SITE_USER")).thenReturn((LoginUser) session.getAttribute(SessionKeys.SITE_LOGIN_USER));
         when(projectIssueService.createIssue("battle-log", 5L, request)).thenReturn(view);
 
         ApiResponse<ProjectIssueView> response = controller.createIssue("battle-log", request, requestWithSession(session));
@@ -79,6 +94,7 @@ class ProjectIssueControllerTest {
         );
         ProjectIssueView view = new ProjectIssueView();
         view.setId(61L);
+        when(authService.currentUser(5L, "SITE_USER")).thenReturn((LoginUser) session.getAttribute(SessionKeys.SITE_LOGIN_USER));
         when(projectIssueService.listSpaceProjectIssues(5L, 7L)).thenReturn(Arrays.asList(view));
 
         ApiResponse<List<ProjectIssueView>> response = controller.listSpaceProjectIssues(7L, requestWithSession(session));

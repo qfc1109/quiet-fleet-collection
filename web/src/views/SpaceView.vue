@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import FileTreeList from '../components/FileTreeList.vue'
-import { updateCurrentUserProfile, uploadCurrentUserAvatar } from '../api/auth'
+import { revokeOtherSessions, updateCurrentUserProfile, uploadCurrentUserAvatar } from '../api/auth'
 import {
   createSpaceProject,
   deleteSpaceProject,
@@ -443,6 +443,16 @@ async function saveProfile() {
   }
 }
 
+async function kickOtherDevices() {
+  error.value = ''
+  try {
+    await revokeOtherSessions()
+    showSuccessMessage('已踢出其他设备')
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : '踢出其他设备失败'
+  }
+}
+
 function triggerAvatarInput() {
   if (uploadingAvatar.value) {
     error.value = '头像正在上传，请稍候'
@@ -775,6 +785,9 @@ onBeforeUnmount(clearMessage)
           </div>
           <button class="secondary-action" type="button" :disabled="uploadingAvatar" @click="triggerAvatarInput">
             {{ uploadingAvatar ? '上传中' : '上传头像' }}
+          </button>
+          <button class="secondary-action" type="button" @click="kickOtherDevices">
+            踢出其他设备
           </button>
           <input
             ref="avatarInput"

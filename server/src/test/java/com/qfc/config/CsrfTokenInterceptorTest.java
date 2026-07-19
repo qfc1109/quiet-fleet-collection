@@ -47,4 +47,19 @@ class CsrfTokenInterceptorTest {
 
         assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
     }
+
+    @Test
+    void bearerTokenPostSkipsCsrfCheck() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/space/projects");
+        request.addHeader("Authorization", "Bearer access-token");
+
+        assertTrue(interceptor.preHandle(request, new MockHttpServletResponse(), new Object()));
+    }
+
+    @Test
+    void tokenEndpointsSkipCsrfCheck() {
+        assertTrue(interceptor.preHandle(new MockHttpServletRequest("POST", "/api/auth/token"), new MockHttpServletResponse(), new Object()));
+        assertTrue(interceptor.preHandle(new MockHttpServletRequest("POST", "/api/auth/admin/token"), new MockHttpServletResponse(), new Object()));
+        assertTrue(interceptor.preHandle(new MockHttpServletRequest("POST", "/api/auth/refresh"), new MockHttpServletResponse(), new Object()));
+    }
 }

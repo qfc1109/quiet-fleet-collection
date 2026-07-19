@@ -2,7 +2,15 @@ import axios, { type InternalAxiosRequestConfig } from 'axios'
 import { ApiError } from './types'
 
 const CSRF_HEADER = 'X-CSRF-Token'
+const ACCESS_TOKEN_KEY = 'qfc.accessToken'
+const REFRESH_TOKEN_KEY = 'qfc.refreshToken'
+const TOKEN_EXPIRES_AT_KEY = 'qfc.tokenExpiresAt'
 const csrfHttp = axios.create({
+  baseURL: '/api',
+  timeout: 10000,
+  withCredentials: true,
+})
+const refreshHttp = axios.create({
   baseURL: '/api',
   timeout: 10000,
   withCredentials: true,
@@ -21,6 +29,32 @@ export function registerSessionInvalidationHandler(handler: () => void) {
   }
 }
 
+export interface StoredAuthTokens {
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+}
+
+export function setAuthTokens(tokens: StoredAuthTokens) {
+  localStorage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken)
+  localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken)
+  localStorage.setItem(TOKEN_EXPIRES_AT_KEY, String(Date.now() + tokens.expiresIn * 1000))
+}
+
+export function clearAuthTokens() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY)
+  localStorage.removeItem(REFRESH_TOKEN_KEY)
+  localStorage.removeItem(TOKEN_EXPIRES_AT_KEY)
+}
+
+function accessToken() {
+  return localStorage.getItem(ACCESS_TOKEN_KEY) || ''
+}
+
+function refreshToken() {
+  return localStorage.getItem(REFRESH_TOKEN_KEY) || ''
+}
+
 export const http = axios.create({
   baseURL: '/api',
   timeout: 10000,
@@ -28,7 +62,11 @@ export const http = axios.create({
 })
 
 http.interceptors.request.use(async (config) => {
-  if (isUnsafeMethod(config.method)) {
+  const token = accessToken()
+  if (token) {
+    setBearerHeader(config, token)
+  }
+  if (isUnsafeMethod(config.method) && !token) {
     setCsrfHeader(config, await loadCsrfToken())
   }
   return config
@@ -38,9 +76,20 @@ http.interceptors.response.use(
   (response) => response,
   async (error) => {
     const data = await readErrorResponseData(error)
+    const config = error.config as (InternalAxiosRequestConfig & { authRetried?: boolean; csrfRetried?: boolean }) | undefined
+    if ((error.response?.status === 401 || data?.code === 'INVALID_TOKEN') && config && !config.authRetried && refreshToken()) {
+      config.authRetried = true
+      try {
+        const result = await refreshAccessToken()
+        setAuthTokens(result)
+        setBearerHeader(config, result.accessToken)
+        return http(config)
+      } catch {
+        clearAuthTokens()
+      }
+    }
     if (data?.code === 'CSRF_TOKEN_INVALID') {
       csrfToken = ''
-      const config = error.config as (InternalAxiosRequestConfig & { csrfRetried?: boolean }) | undefined
       if (config && !config.csrfRetried && isUnsafeMethod(config.method)) {
         config.csrfRetried = true
         setCsrfHeader(config, await loadCsrfToken())
@@ -57,6 +106,23 @@ http.interceptors.response.use(
     return Promise.reject(error)
   },
 )
+
+async function refreshAccessToken(): Promise<StoredAuthTokens> {
+  const token = refreshToken()
+  if (!token) {
+    throw new Error('refresh token missing')
+  }
+  const response = await refreshHttp.post('/auth/refresh', { refreshToken: token })
+  const data = response.data?.data
+  if (!data?.accessToken || !data?.refreshToken) {
+    throw new Error('refresh token response missing')
+  }
+  return {
+    accessToken: data.accessToken,
+    refreshToken: data.refreshToken,
+    expiresIn: Number(data.expiresIn || 0),
+  }
+}
 
 function isUnsafeMethod(method?: string) {
   return ['post', 'put', 'patch', 'delete'].includes((method || 'get').toLowerCase())
@@ -123,5 +189,17 @@ function setCsrfHeader(config: InternalAxiosRequestConfig, token: string) {
   config.headers = {
     ...(headers || {}),
     [CSRF_HEADER]: token,
+  } as any
+}
+
+function setBearerHeader(config: InternalAxiosRequestConfig, token: string) {
+  const headers = config.headers as any
+  if (headers && typeof headers.set === 'function') {
+    headers.set('Authorization', `Bearer ${token}`)
+    return
+  }
+  config.headers = {
+    ...(headers || {}),
+    Authorization: `Bearer ${token}`,
   } as any
 }

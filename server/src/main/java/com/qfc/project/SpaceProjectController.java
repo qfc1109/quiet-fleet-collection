@@ -1,9 +1,8 @@
 package com.qfc.project;
 
 import com.qfc.auth.LoginUser;
-import com.qfc.auth.LoginSessionService;
+import com.qfc.auth.CurrentUserResolver;
 import com.qfc.common.ApiResponse;
-import com.qfc.config.SessionKeys;
 import com.qfc.file.FileArchive;
 import com.qfc.file.FileService;
 import com.qfc.file.FileView;
@@ -34,18 +33,18 @@ public class SpaceProjectController {
 
     private final ProjectService projectService;
     private final FileService fileService;
-    private final LoginSessionService loginSessionService;
+    private final CurrentUserResolver currentUserResolver;
     private final MultipartProperties multipartProperties;
 
     public SpaceProjectController(
         ProjectService projectService,
         FileService fileService,
-        LoginSessionService loginSessionService,
+        CurrentUserResolver currentUserResolver,
         MultipartProperties multipartProperties
     ) {
         this.projectService = projectService;
         this.fileService = fileService;
-        this.loginSessionService = loginSessionService;
+        this.currentUserResolver = currentUserResolver;
         this.multipartProperties = multipartProperties;
     }
 
@@ -134,7 +133,7 @@ public class SpaceProjectController {
     }
 
     private LoginUser currentSiteUser(HttpServletRequest request) {
-        return loginSessionService.requireLogin(request, SessionKeys.SITE_LOGIN_USER);
+        return currentUserResolver.resolveSite(request);
     }
 
     private String clientIp(HttpServletRequest request) {

@@ -4,6 +4,8 @@ import com.qfc.common.ApiException;
 import com.qfc.common.ApiResponse;
 import com.qfc.config.SessionKeys;
 import java.util.Arrays;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,6 +19,11 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,15 +33,66 @@ class AuthControllerSessionTest {
     @Mock
     private AuthService authService;
 
+    @Mock
+    private ActiveSessionRepository activeSessionRepository;
+
+    @Mock
+    private JwtTokenProvider jwtTokenProvider;
+
+    @Mock
+    private RefreshTokenService refreshTokenService;
+
+    @Mock
+    private TokenProperties tokenProperties;
+
+    private final Map<String, String> sessionStore = new ConcurrentHashMap<String, String>();
+
     private AuthController controller;
     private LoginSessionService loginSessionService;
 
     @BeforeEach
     void setUp() {
+        sessionStore.clear();
+
+        lenient().doAnswer(invocation -> {
+            sessionStore.put(invocation.getArgument(0) + ":" + invocation.getArgument(1), invocation.getArgument(2));
+            return null;
+        }).when(activeSessionRepository).store(anyString(), anyString(), anyString(), anyString(), anyString(), anyLong());
+
+        lenient().when(activeSessionRepository.getLoginToken(anyString(), anyString()))
+            .thenAnswer(invocation -> sessionStore.get(invocation.getArgument(0) + ":" + invocation.getArgument(1)));
+
+        lenient().when(activeSessionRepository.isDeviceActive(anyString(), anyString()))
+            .thenAnswer(invocation -> sessionStore.containsKey(invocation.getArgument(0) + ":" + invocation.getArgument(1)));
+
+        lenient().when(activeSessionRepository.removeIfMatch(anyString(), anyString(), anyString()))
+            .thenAnswer(invocation -> {
+                String key = invocation.getArgument(0) + ":" + invocation.getArgument(1);
+                String token = invocation.getArgument(2);
+                if (token != null && token.equals(sessionStore.get(key))) {
+                    sessionStore.remove(key);
+                    return true;
+                }
+                return false;
+            });
+
+        lenient().doAnswer(invocation -> {
+            sessionStore.remove(invocation.getArgument(0));
+            return null;
+        }).when(activeSessionRepository).remove(anyString());
+
+        lenient().doAnswer(invocation -> {
+            String prefix = invocation.getArgument(0) + ":";
+            String currentDeviceId = invocation.getArgument(1);
+            sessionStore.keySet().removeIf(key -> key.startsWith(prefix) && !key.equals(prefix + currentDeviceId));
+            return null;
+        }).when(activeSessionRepository).removeOthers(anyString(), anyString());
+
         LoginSessionProperties properties = new LoginSessionProperties();
         properties.setSessionLifetimeSeconds(86400);
-        loginSessionService = new LoginSessionService(properties);
-        controller = new AuthController(authService, loginSessionService);
+        loginSessionService = new LoginSessionService(properties, activeSessionRepository);
+        CurrentUserResolver currentUserResolver = new CurrentUserResolver(jwtTokenProvider, authService, loginSessionService);
+        controller = new AuthController(authService, loginSessionService, jwtTokenProvider, refreshTokenService, tokenProperties, currentUserResolver);
     }
 
     @Test
@@ -86,7 +144,7 @@ class AuthControllerSessionTest {
     }
 
     @Test
-    void oldSiteSessionSeesLoggedInElsewhereAfterLatestLogin() {
+    void multipleSiteSessionsRemainValidUntilRevoked() {
         MockHttpServletRequest firstRequest = new MockHttpServletRequest();
         firstRequest.setRemoteAddr("10.0.0.1");
         firstRequest.addHeader("User-Agent", "Chrome");
@@ -98,11 +156,34 @@ class AuthControllerSessionTest {
         when(authService.loginSite("player01", "123456")).thenReturn(siteUser);
         controller.login(request, firstRequest);
         controller.login(request, secondRequest);
+        when(authService.currentUser(10L, "SITE_USER")).thenReturn(siteUser);
+
+        assertSame(siteUser, controller.me(firstRequest).getData());
+        assertSame(siteUser, controller.me(secondRequest).getData());
+    }
+
+    @Test
+    void revokeOtherSessionsInvalidatesPreviousSiteSession() {
+        MockHttpServletRequest firstRequest = new MockHttpServletRequest();
+        firstRequest.setRemoteAddr("10.0.0.1");
+        firstRequest.addHeader("User-Agent", "Chrome");
+        MockHttpServletRequest secondRequest = new MockHttpServletRequest();
+        secondRequest.setRemoteAddr("10.0.0.2");
+        secondRequest.addHeader("User-Agent", "Firefox");
+        LoginRequest request = loginRequest("player01", "123456");
+        LoginUser siteUser = loginUser(10L, "SITE_USER");
+        when(authService.loginSite("player01", "123456")).thenReturn(siteUser);
+        when(authService.currentUser(10L, "SITE_USER")).thenReturn(siteUser);
+        controller.login(request, firstRequest);
+        controller.login(request, secondRequest);
+
+        controller.revokeOtherSessions(secondRequest);
 
         ApiException exception = assertThrows(ApiException.class, () -> controller.me(firstRequest));
 
-        assertEquals("ACCOUNT_LOGGED_IN_ELSEWHERE", exception.getCode());
+        assertEquals("UNAUTHORIZED", exception.getCode());
         assertNull(firstRequest.getSession(false).getAttribute(SessionKeys.SITE_LOGIN_USER));
+        assertSame(siteUser, controller.me(secondRequest).getData());
     }
 
     @Test

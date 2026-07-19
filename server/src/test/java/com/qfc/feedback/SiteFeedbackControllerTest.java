@@ -3,6 +3,10 @@ package com.qfc.feedback;
 import com.qfc.auth.LoginUser;
 import com.qfc.auth.LoginSessionProperties;
 import com.qfc.auth.LoginSessionService;
+import com.qfc.auth.ActiveSessionRepository;
+import com.qfc.auth.AuthService;
+import com.qfc.auth.CurrentUserResolver;
+import com.qfc.auth.JwtTokenProvider;
 import com.qfc.common.ApiException;
 import com.qfc.common.ApiResponse;
 import com.qfc.config.SessionKeys;
@@ -27,13 +31,23 @@ class SiteFeedbackControllerTest {
     @Mock
     private SiteFeedbackService siteFeedbackService;
 
+    @Mock
+    private ActiveSessionRepository activeSessionRepository;
+
+    @Mock
+    private AuthService authService;
+
+    @Mock
+    private JwtTokenProvider jwtTokenProvider;
+
     private SiteFeedbackController controller;
 
     @BeforeEach
     void setUp() {
         LoginSessionProperties properties = new LoginSessionProperties();
         properties.setSessionLifetimeSeconds(86400);
-        controller = new SiteFeedbackController(siteFeedbackService, new LoginSessionService(properties));
+        LoginSessionService loginSessionService = new LoginSessionService(properties, activeSessionRepository);
+        controller = new SiteFeedbackController(siteFeedbackService, new CurrentUserResolver(jwtTokenProvider, authService, loginSessionService));
     }
 
     @Test
@@ -62,6 +76,7 @@ class SiteFeedbackControllerTest {
         request.setContent("导航入口不好找。");
         SiteFeedbackView view = new SiteFeedbackView();
         view.setId(81L);
+        when(authService.currentUser(5L, "SITE_USER")).thenReturn((LoginUser) session.getAttribute(SessionKeys.SITE_LOGIN_USER));
         when(siteFeedbackService.createFeedback(5L, request)).thenReturn(view);
 
         ApiResponse<SiteFeedbackView> response = controller.createFeedback(request, requestWithSession(session));

@@ -1,9 +1,8 @@
 package com.qfc.issue;
 
 import com.qfc.auth.LoginUser;
-import com.qfc.auth.LoginSessionService;
+import com.qfc.auth.CurrentUserResolver;
 import com.qfc.common.ApiResponse;
-import com.qfc.config.SessionKeys;
 import java.util.List;
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
@@ -17,11 +16,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProjectIssueController {
 
     private final ProjectIssueService projectIssueService;
-    private final LoginSessionService loginSessionService;
+    private final CurrentUserResolver currentUserResolver;
 
-    public ProjectIssueController(ProjectIssueService projectIssueService, LoginSessionService loginSessionService) {
+    public ProjectIssueController(ProjectIssueService projectIssueService, CurrentUserResolver currentUserResolver) {
         this.projectIssueService = projectIssueService;
-        this.loginSessionService = loginSessionService;
+        this.currentUserResolver = currentUserResolver;
     }
 
     @PostMapping("/api/public/projects/{slug}/issues")
@@ -44,6 +43,6 @@ public class ProjectIssueController {
     }
 
     private LoginUser currentSiteUser(HttpServletRequest request) {
-        return loginSessionService.requireLogin(request, SessionKeys.SITE_LOGIN_USER);
+        return currentUserResolver.resolveSite(request);
     }
 }

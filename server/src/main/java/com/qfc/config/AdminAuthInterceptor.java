@@ -1,7 +1,7 @@
 package com.qfc.config;
 
 import com.qfc.auth.LoginUser;
-import com.qfc.auth.LoginSessionService;
+import com.qfc.auth.CurrentUserResolver;
 import com.qfc.admin.RbacUserSessionService;
 import com.qfc.common.ApiException;
 import javax.servlet.http.HttpServletRequest;
@@ -14,16 +14,16 @@ import org.springframework.web.servlet.HandlerInterceptor;
 public class AdminAuthInterceptor implements HandlerInterceptor {
 
     private final RbacUserSessionService rbacUserSessionService;
-    private final LoginSessionService loginSessionService;
+    private final CurrentUserResolver currentUserResolver;
 
-    public AdminAuthInterceptor(RbacUserSessionService rbacUserSessionService, LoginSessionService loginSessionService) {
+    public AdminAuthInterceptor(RbacUserSessionService rbacUserSessionService, CurrentUserResolver currentUserResolver) {
         this.rbacUserSessionService = rbacUserSessionService;
-        this.loginSessionService = loginSessionService;
+        this.currentUserResolver = currentUserResolver;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        LoginUser loginUser = loginSessionService.requireLogin(request, SessionKeys.ADMIN_LOGIN_USER);
+        LoginUser loginUser = currentUserResolver.resolveAdmin(request);
         if (!RbacUserSessionService.ACCOUNT_TYPE_ADMIN.equals(loginUser.getAccountType())) {
             throw new ApiException("FORBIDDEN", "没有后台操作权限", HttpServletResponse.SC_FORBIDDEN);
         }

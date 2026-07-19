@@ -16,7 +16,7 @@ public class CsrfTokenInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (isSafeMethod(request.getMethod())) {
+        if (isSafeMethod(request.getMethod()) || isBearerRequest(request) || isTokenEndpoint(request)) {
             return true;
         }
         HttpSession session = request.getSession(false);
@@ -33,5 +33,17 @@ public class CsrfTokenInterceptor implements HandlerInterceptor {
             || HttpMethod.HEAD.matches(method)
             || HttpMethod.OPTIONS.matches(method)
             || HttpMethod.TRACE.matches(method);
+    }
+
+    private boolean isBearerRequest(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        return StringUtils.hasText(authorization) && authorization.startsWith("Bearer ");
+    }
+
+    private boolean isTokenEndpoint(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return "/api/auth/token".equals(path)
+            || "/api/auth/admin/token".equals(path)
+            || "/api/auth/refresh".equals(path);
     }
 }

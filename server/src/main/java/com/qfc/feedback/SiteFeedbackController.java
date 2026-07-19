@@ -1,9 +1,8 @@
 package com.qfc.feedback;
 
 import com.qfc.auth.LoginUser;
-import com.qfc.auth.LoginSessionService;
+import com.qfc.auth.CurrentUserResolver;
 import com.qfc.common.ApiResponse;
-import com.qfc.config.SessionKeys;
 import java.util.List;
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
@@ -16,11 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class SiteFeedbackController {
 
     private final SiteFeedbackService siteFeedbackService;
-    private final LoginSessionService loginSessionService;
+    private final CurrentUserResolver currentUserResolver;
 
-    public SiteFeedbackController(SiteFeedbackService siteFeedbackService, LoginSessionService loginSessionService) {
+    public SiteFeedbackController(SiteFeedbackService siteFeedbackService, CurrentUserResolver currentUserResolver) {
         this.siteFeedbackService = siteFeedbackService;
-        this.loginSessionService = loginSessionService;
+        this.currentUserResolver = currentUserResolver;
     }
 
     @PostMapping("/api/public/feedback")
@@ -38,6 +37,6 @@ public class SiteFeedbackController {
     }
 
     private LoginUser currentSiteUser(HttpServletRequest request) {
-        return loginSessionService.requireLogin(request, SessionKeys.SITE_LOGIN_USER);
+        return currentUserResolver.resolveSite(request);
     }
 }

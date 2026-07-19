@@ -3,6 +3,10 @@ package com.qfc.project;
 import com.qfc.auth.LoginUser;
 import com.qfc.auth.LoginSessionProperties;
 import com.qfc.auth.LoginSessionService;
+import com.qfc.auth.ActiveSessionRepository;
+import com.qfc.auth.AuthService;
+import com.qfc.auth.CurrentUserResolver;
+import com.qfc.auth.JwtTokenProvider;
 import com.qfc.common.ApiResponse;
 import com.qfc.config.SessionKeys;
 import com.qfc.file.FileArchive;
@@ -36,6 +40,15 @@ class SpaceProjectControllerTest {
     @Mock
     private FileService fileService;
 
+    @Mock
+    private ActiveSessionRepository activeSessionRepository;
+
+    @Mock
+    private AuthService authService;
+
+    @Mock
+    private JwtTokenProvider jwtTokenProvider;
+
     private SpaceProjectController controller;
 
     @BeforeEach
@@ -44,7 +57,8 @@ class SpaceProjectControllerTest {
         properties.setSessionLifetimeSeconds(86400);
         MultipartProperties multipartProperties = new MultipartProperties();
         multipartProperties.setMaxFileSize(DataSize.ofMegabytes(2));
-        controller = new SpaceProjectController(projectService, fileService, new LoginSessionService(properties), multipartProperties);
+        LoginSessionService loginSessionService = new LoginSessionService(properties, activeSessionRepository);
+        controller = new SpaceProjectController(projectService, fileService, new CurrentUserResolver(jwtTokenProvider, authService, loginSessionService), multipartProperties);
     }
 
     @Test
@@ -58,6 +72,7 @@ class SpaceProjectControllerTest {
         project.setId(11L);
         project.setOwnerUserId(5L);
         project.setName("我的项目");
+        when(authService.currentUser(5L, "SITE_USER")).thenReturn((LoginUser) session.getAttribute(SessionKeys.SITE_LOGIN_USER));
         when(projectService.listSpaceProjects(5L)).thenReturn(Arrays.asList(project));
 
         ApiResponse<List<ProjectView>> response = controller.listProjects(requestWithSession(session));
@@ -75,6 +90,7 @@ class SpaceProjectControllerTest {
         );
         MockHttpServletRequest request = requestWithSession(session);
         request.setRemoteAddr("127.0.0.1");
+        when(authService.currentUser(5L, "SITE_USER")).thenReturn((LoginUser) session.getAttribute(SessionKeys.SITE_LOGIN_USER));
 
         ApiResponse<Boolean> response = controller.deleteProject(31L, request);
 
@@ -90,6 +106,8 @@ class SpaceProjectControllerTest {
             new LoginUser(5L, "player01", "网站用户", "SITE_USER", "ENABLED", Arrays.asList(), Arrays.asList())
         );
 
+        when(authService.currentUser(5L, "SITE_USER")).thenReturn((LoginUser) session.getAttribute(SessionKeys.SITE_LOGIN_USER));
+
         ApiResponse<SpaceUploadLimitView> response = controller.uploadLimits(requestWithSession(session));
 
         assertEquals(2L * 1024L * 1024L, response.getData().getMaxFileSizeBytes());
@@ -103,6 +121,7 @@ class SpaceProjectControllerTest {
             new LoginUser(5L, "player01", "网站用户", "SITE_USER", "ENABLED", Arrays.asList(), Arrays.asList())
         );
         FileArchive archive = new FileArchive("docs.zip", "application/zip", Collections.emptyList());
+        when(authService.currentUser(5L, "SITE_USER")).thenReturn((LoginUser) session.getAttribute(SessionKeys.SITE_LOGIN_USER));
         when(fileService.openOwnedProjectArchive(5L, 31L)).thenReturn(archive);
 
         ResponseEntity<StreamingResponseBody> response = controller.downloadProjectArchive(31L, requestWithSession(session));
@@ -121,6 +140,7 @@ class SpaceProjectControllerTest {
         ProjectFileArchiveRequest archiveRequest = new ProjectFileArchiveRequest();
         archiveRequest.setFileIds(Arrays.asList(3L, 4L));
         FileArchive archive = new FileArchive("docs-selected.zip", "application/zip", Collections.emptyList());
+        when(authService.currentUser(5L, "SITE_USER")).thenReturn((LoginUser) session.getAttribute(SessionKeys.SITE_LOGIN_USER));
         when(fileService.openOwnedSelectedProjectFilesArchive(5L, 31L, Arrays.asList(3L, 4L))).thenReturn(archive);
 
         ResponseEntity<StreamingResponseBody> response =
