@@ -64,3 +64,9 @@ qfc:
       secret: ${QFC_JWT_SECRET:}
       access-token-expiry-seconds: 900
       refresh-token-expiry-seconds: 604800
+  rag:
+    model: ${QFC_RAG_MODEL:gpt-5.6-terra}
+    base-url: ${QFC_RAG_BASE_URL:}
+    api-key: ${QFC_RAG_API_KEY:}
+    timeout-ms: ${QFC_RAG_TIMEOUT_MS:30000}
+    monthly-limit: ${QFC_RAG_MONTHLY_LIMIT:0}

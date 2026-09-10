@@ -19,7 +19,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @Configuration
 @EnableTransactionManagement
 @MapperScan(
-    basePackages = {"com.qfc.user", "com.qfc.project", "com.qfc.file", "com.qfc.issue", "com.qfc.feedback"},
+    basePackages = {"com.qfc.user", "com.qfc.project", "com.qfc.file", "com.qfc.issue", "com.qfc.feedback", "com.qfc.rag"},
     sqlSessionTemplateRef = "siteSqlSessionTemplate"
 )
 public class SiteDataSourceConfig {

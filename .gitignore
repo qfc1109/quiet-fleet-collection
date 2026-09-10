@@ -53,6 +53,16 @@ config/application-local.yml
 config/mysql-client.cnf
 config/application.yml
 config/mysql.env
+config/rag-model.yml
+config/rag-model.yaml
+config/rag-model.properties
+config/rag-model.env
+deploy/server/qfc.env
+deploy/server/application-local.yml
+deploy/server/application-local.yaml
+deploy/server/application-local.properties
+*.secret
+*.secrets
 application-local.yml
 application-local.yaml
 application-local.properties
