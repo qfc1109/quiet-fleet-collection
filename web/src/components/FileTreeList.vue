@@ -39,9 +39,9 @@ const emit = defineEmits<{
   'update:selectedFileIds': [fileIds: number[]]
 }>()
 
-const collapsedDirectoryPaths = ref(new Set<string>())
 const allRows = computed(() => buildFileTreeRows(props.files))
 const directoryPaths = computed(() => fileTreeDirectoryPaths(allRows.value))
+const collapsedDirectoryPaths = ref(new Set(directoryPaths.value))
 const rows = computed(() => visibleFileTreeRows(allRows.value, collapsedDirectoryPaths.value))
 const selectableFiles = computed(() => allRows.value.filter((row) => row.type === 'file').map((row) => row.file))
 const selectedFileIdSet = computed(() => new Set(props.selectedFileIds))

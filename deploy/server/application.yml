@@ -1,0 +1,16 @@
+server:
+  address: 127.0.0.1
+  port: 8081
+
+qfc:
+  datasource:
+    site:
+      url: jdbc:mysql://127.0.0.1:3306/qfc_site?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    site-log:
+      url: jdbc:mysql://127.0.0.1:3306/qfc_site_log?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    admin:
+      url: jdbc:mysql://127.0.0.1:3306/qfc_admin?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    admin-log:
+      url: jdbc:mysql://127.0.0.1:3306/qfc_admin_log?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+  storage:
+    root: /home/qfc/storage

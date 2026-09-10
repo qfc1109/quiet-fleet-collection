@@ -1,0 +1,24 @@
+[Unit]
+Description=Quiet Fleet Collection backend
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=qfc
+Group=qfc
+WorkingDirectory=/opt/qfc/current
+EnvironmentFile=/etc/qfc/qfc.env
+ExecStart=/usr/bin/java -Xms256m -Xmx768m -DLOG_HOME=/home/qfc/logs -Dlogging.config=/etc/qfc/logback-spring.xml -jar /opt/qfc/current/server/qfc-server.jar --spring.config.additional-location=optional:file:/etc/qfc/
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/home/qfc
+
+[Install]
+WantedBy=multi-user.target

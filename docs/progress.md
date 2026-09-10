@@ -4,6 +4,8 @@
 
 - 第一版设计规格：[2026-07-01-quiet-fleet-collection-design.md](superpowers/specs/2026-07-01-quiet-fleet-collection-design.md)
 - 第一版实现计划：[2026-07-01-quiet-fleet-collection-v1.md](superpowers/plans/2026-07-01-quiet-fleet-collection-v1.md)
+- RAG 决策记录：[2026-09-05-project-rag-knowledge-base.md](adr/2026-09-05-project-rag-knowledge-base.md)
+- RAG 术语表：[glossary.md](glossary.md)
 
 ## 需求：开发轻帆集 / Quiet Fleet Collection 第一版 <2026-07-01 14-18-28>：
 
@@ -52,3 +54,12 @@
 - 【✔】 阶段 2：实现安全与健壮性修复；结果：新增 `/api/auth/csrf` 和 `X-CSRF-Token` 校验，前端 unsafe method 自动取 token 并重试一次；登录成功后调用 `changeSessionId()`；项目创建/编辑校验 slug 唯一和 visibility；全局异常兜底返回 `INTERNAL_ERROR`；头像按文件魔数识别，文件 inline 响应添加 `X-Content-Type-Options: nosniff`；后台管理员角色表单改为完整 `roleCodes` 多选；主站空间仅允许 `SITE_USER`；影响范围：`server/src/main/java/com/qfc`、`web/src/api/http.ts`、`admin-web/src/api/http.ts`、`admin-web/src/views/AdminDashboardView.vue`、`web/src/router/spaceAccess.ts`；验证：`mvn -f server\pom.xml test -B -ntp` 通过，`npm --prefix web run build` 通过，`npm --prefix admin-web run build` 通过
 - 【✔】 阶段 3：优化本地脚本并重启后端；结果：新增可双击执行的 `scripts/start-dev.bat`、`scripts/restart-backend.bat`、`scripts/organize-logs.bat` 和后端专用 `scripts/restart-backend.ps1`，`start-dev.ps1` 启动前会清理本项目占用 `8081/5173/5174` 的旧进程；已重启后端并确认后台登录可用；影响范围：`scripts/`、本机 8081 后端进程、`README.md`；验证：`GET http://127.0.0.1:8081/api/auth/csrf` 返回 `SUCCESS` 且 token 长度 36，携带 token 调用后台登录 `admin / 123456` 返回 `SUCCESS / ADMIN / admin`，经 `5174` 代理访问 `/api/auth/csrf` 返回 `SUCCESS`
 - 【✔】 阶段 4：同步项目文档；结果：补充安全要求、CSRF/session 行为、文件 MIME 和 `nosniff` 策略、本地 bat 脚本使用说明以及本轮验证记录；影响范围：`docs/progress.md`、`docs/development.md`、`docs/design.md`、`docs/requirements.md`；验证：重新扫描文档中的 `CSRF`、`restart-backend`、`start-dev.bat`、`nosniff`、`visibility` 等关键词
+
+## 需求：规划项目级 RAG 知识库与文档问答 <2026-09-05>：
+
+- 【✔】 设计讨论记录：确定项目作为逻辑知识库边界，新增项目级成员关系和 `VIEWER` / `EDITOR` 角色（`VIEWER` 只读问答、`EDITOR` 可编辑文件，成员管理和外部共享仅负责人可操作），默认不自动入库，负责人显式选择非敏感文件，目录只形成当前文件快照，成员可查询已纳入文件；确定页面内仅携带最近三组问答、可点击引用、文件索引状态、普通 JSON 响应、简单文本/关键词召回、规模边界和回答准确性反馈统计（每用户每回答一次、返回临时 `answerId`）；确定模型使用可配置的 OpenAI 兼容 REST 适配器（`baseUrl`、模型名、API Key、超时和额度），MVP 首批抽取 Markdown/纯文本/Word，PDF 后置；负责人由后台管理员指定，成员从已有网站用户中选择；影响范围：`docs/adr/2026-09-05-project-rag-knowledge-base.md`、`docs/glossary.md`、`docs/requirements.md`、`docs/design.md`、`docs/development.md`、`docs/progress.md`；验证：人工复读并区分“已确认决策”和“尚未实现/待确认项”
+- 【⏳】 安全前置：统一项目/成员/文件可见性校验，盘点并处理公开项目中的疑似敏感文件；前置条件：负责人确认敏感文件是否为真实凭据并完成必要的撤下/轮换
+- 【✔】 技术路线定稿：采用 OpenAI 兼容 REST 自定义模型适配器，模型名确定为 `gpt-5.6-terra`；MVP 使用简单文本/关键词召回；目录选择采用当前文件快照；首批抽取 Markdown/纯文本/Word，PDF 后置；成员只从已有网站用户中选择；反馈以临时 `answerId` 去重，每用户每回答一次且只保存元数据
+- 【⏳】 实现输入与工程细节：落实实际模型 `baseUrl`、API Key、超时和额度、成员邀请/移除界面、解析器实现、反馈表唯一约束、索引 worker 和手工数据库迁移方案；API Key 通过被忽略的本地/部署配置注入，不上传仓库
+- 【✔】 配置安全补充（2026-09-07）：确认模型名为 `gpt-5.6-terra`；扩充 `.gitignore` 覆盖 RAG 模型本地配置、部署 `qfc.env` 和 secret 文件名；未读取或写入任何 API Key
+- 【⏳】 功能实现：完成成员、文件纳入、索引 worker、状态展示、聊天接口、引用回链和反馈统计；当前尚未开始，未新增接口或数据库表
